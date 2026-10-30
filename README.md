@@ -1,4 +1,4 @@
-# runnerdeck
+# runner
 
 Your self-hosted GitHub Actions runners, the machines they run on and the runs
 they work on, on one btop-style screen in the terminal.
@@ -17,11 +17,11 @@ for the runs, and ssh keys for other machines (never a password prompt).
 ## Use
 
 ```
-python3 runnerdeck.py --init       # writes ~/.config/runnerdeck/config.ini
-$EDITOR ~/.config/runnerdeck/config.ini
-python3 runnerdeck.py              # starts local runners that are down, then the screen
-python3 runnerdeck.py --status     # the screen once, as text
-python3 runnerdeck.py --install    # copies itself to ~/runnerdeck.py and adds `runnerdeck`
+python3 runner.py --init       # writes ~/.config/runner/config.ini
+$EDITOR ~/.config/runner/config.ini
+python3 runner.py              # starts local runners that are down, then the screen
+python3 runner.py --status     # the screen once, as text
+python3 runner.py --install    # copies itself to ~/runner.py and adds `runner`
 ```
 
 q leaves, the runners keep running. x stops them, s starts them.
@@ -52,7 +52,7 @@ label = deploy-request                 # waits on the screen; a starts it, d dec
 
 The keys are the ones you have: `gh auth login` for GitHub (a registration token
 for a new local runner comes from it, or is asked for), and your ssh key for a
-host. runnerdeck stores no secret.
+host. runner stores no secret.
 
 ## What it will and will not do
 
@@ -80,5 +80,5 @@ It began as `dev/runners.py` in a private app repository, for one Mac and one PC
 ## Tests
 
 ```
-python3 tests/test_runnerdeck.py
+python3 tests/test_runner.py
 ```

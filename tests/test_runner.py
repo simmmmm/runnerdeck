@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""python3 tests/test_runnerdeck.py — config, requests, the machine's answer, the screen."""
+"""python3 tests/test_runner.py — config, requests, the machine's answer, the screen."""
 import configparser
 import os
 import stat
@@ -9,7 +9,7 @@ import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-import runnerdeck as deck
+import runner as deck
 
 
 def configured(text):
@@ -99,19 +99,19 @@ with tempfile.TemporaryDirectory() as tmp:
     config = os.path.join(tmp, "config.ini")
     with open(config, "w") as file:
         file.write("[deck]\nrepos = a/b\n[host workstation]\nssh = me@box\nservice = runner.service\n")
-    env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"], RUNNERDECK_CONFIG=config, RUNNERDECK_HOME=tmp)
-    out = subprocess.run([sys.executable, os.path.join(ROOT, "runnerdeck.py"), "--status"], env=env,
+    env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"], RUNNER_CONFIG=config, RUNNER_HOME=tmp)
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "runner.py"), "--status"], env=env,
                          capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
-    assert "workstation" in out.stdout and "box" in out.stdout and "◐ runnerdeck" in out.stdout, out.stdout
+    assert "workstation" in out.stdout and "box" in out.stdout and "◐ runner" in out.stdout, out.stdout
     # No config: it says what to do, and does not draw.
-    env["RUNNERDECK_CONFIG"] = os.path.join(tmp, "none.ini")
-    out = subprocess.run([sys.executable, os.path.join(ROOT, "runnerdeck.py"), "--status"], env=env, capture_output=True, text=True)
+    env["RUNNER_CONFIG"] = os.path.join(tmp, "none.ini")
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "runner.py"), "--status"], env=env, capture_output=True, text=True)
     assert out.returncode != 0 and "--init" in out.stderr, out.stderr
     # --init writes an example that is itself a valid config, and does not overwrite.
-    out = subprocess.run([sys.executable, os.path.join(ROOT, "runnerdeck.py"), "--init"], env=env, capture_output=True, text=True)
-    assert out.returncode == 0 and os.path.exists(env["RUNNERDECK_CONFIG"]), out.stderr
-    configured(open(env["RUNNERDECK_CONFIG"]).read())
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "runner.py"), "--init"], env=env, capture_output=True, text=True)
+    assert out.returncode == 0 and os.path.exists(env["RUNNER_CONFIG"]), out.stderr
+    configured(open(env["RUNNER_CONFIG"]).read())
     assert deck.REPOS == ["owner/name"] and deck.LOCAL["count"] == 1
 
 print("ok")

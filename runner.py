@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""runnerdeck: self-hosted GitHub Actions runners, the machines they run on and
+"""runner: self-hosted GitHub Actions runners, the machines they run on and
 the runs they work on, on one btop-style screen in the terminal.
 
-    runnerdeck.py --init      write an example config, then edit it
-    runnerdeck.py             start the local runners that are not running, then the screen
-    runnerdeck.py --status    the screen once, as text
-    runnerdeck.py --install   copy this to ~/runnerdeck.py, and `runnerdeck` in your shell
+    runner.py --init      write an example config, then edit it
+    runner.py             start the local runners that are not running, then the screen
+    runner.py --status    the screen once, as text
+    runner.py --install   copy this to ~/runner.py, and `runner` in your shell
 
 What it shows: this machine (CPU, GPU, memory, power, heat; macOS or Linux),
 other machines over ssh, the runners on this machine (what each is doing and how
@@ -14,7 +14,7 @@ far its job is), the last runs of your repositories, and the log of one runner.
 cannot be taken back asks first, in a box in the middle.
 
 Add a repository, say what runners it has, and that is all: a config file
-(~/.config/runnerdeck/config.ini, or RUNNERDECK_CONFIG), see --init.
+(~/.config/runner/config.ini, or RUNNER_CONFIG), see --init.
 
     [deck]
     repos = owner/name, owner/other        # what `gh` reads runs from
@@ -62,7 +62,7 @@ import threading
 import time
 from collections import deque
 
-CONFIG = os.path.expanduser(os.environ.get("RUNNERDECK_CONFIG", "~/.config/runnerdeck/config.ini"))
+CONFIG = os.path.expanduser(os.environ.get("RUNNER_CONFIG", "~/.config/runner/config.ini"))
 SLUG = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$")
 HOST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@:-]*$")
@@ -123,7 +123,7 @@ def configure(config):
     for repo in REPOS:
         if not SLUG.match(repo):
             raise ConfigError(f"not a repository, owner/name: {repo}")
-    HOME = os.path.expanduser(os.environ.get("RUNNERDECK_HOME", "~"))
+    HOME = os.path.expanduser(os.environ.get("RUNNER_HOME", "~"))
     LOCAL = None
     if config.has_section("local"):
         local = config["local"]
@@ -161,7 +161,7 @@ def configure(config):
 def load():
     config = configparser.ConfigParser()
     if not config.read(CONFIG):
-        raise ConfigError(f"no config at {CONFIG}: runnerdeck.py --init writes an example")
+        raise ConfigError(f"no config at {CONFIG}: runner.py --init writes an example")
     configure(config)
 
 
@@ -351,7 +351,7 @@ def approve(request):
                              capture_output=True, text=True, timeout=15)
     if started.returncode:
         return f"{workflow} did not start: {started.stderr.strip()}", False
-    close(request, f"Approved in runnerdeck; {workflow} started.")
+    close(request, f"Approved in runner; {workflow} started.")
     return f"{workflow} started from {branch} at {sha[:7]}", True
 
 
@@ -673,7 +673,7 @@ def ask_pc(host, service=""):
     command = ["sh", "-s", service]
     if host is not None:
         command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ControlMaster=auto",
-                   "-o", "ControlPersist=120", "-o", "ControlPath=" + os.path.expanduser("~/.ssh/runnerdeck-%C"),
+                   "-o", "ControlPersist=120", "-o", "ControlPath=" + os.path.expanduser("~/.ssh/runner-%C"),
                    "--", host, *command]
     got = subprocess.run(command, input=PC_ASKS, capture_output=True, text=True, timeout=20)
     return parse_pc(got.stdout) if got.returncode == 0 and got.stdout.strip() else None
@@ -826,7 +826,7 @@ def watch(runners):
                 stamp, job, result = ended
                 name = NAMES.get(job, job)
                 good = result.lower() == "succeeded"
-                notify(f"runnerdeck · {runner.name}", f"{name} {result.lower()}", "Glass" if good else "Basso")
+                notify(f"runner · {runner.name}", f"{name} {result.lower()}", "Glass" if good else "Basso")
                 with open(JOBS, "a") as log:
                     log.write(f"{stamp}Z {runner.name} {name} {result}\n")
 
@@ -1235,7 +1235,7 @@ def paint(canvas, runners, queue, machine, shown, note, picked=None, dialog=None
     GitHub's last runs and a log, the log taking what is left and GitHub
     giving way first."""
     width, height = canvas.width, canvas.height
-    canvas.put(0, 1, "◐ runnerdeck", "strong")
+    canvas.put(0, 1, "◐ runner", "strong")
     awake = "awake" if alive(AWAKE) else "may sleep"
     told = " · notifying" if alive(WATCH) else ""
     if runners:
@@ -1297,7 +1297,7 @@ def show(window, runners, queue, machine, pcs=()):
                     return said, closed
                 return ask(item["workflow"], f"Start {what}?", "Start", "Not now", lambda: queue.carry_out(row, "starting", start))
             def decline():
-                close(item, "Declined in runnerdeck.")
+                close(item, "Declined in runner.")
                 queue.over.add((item["repo"], item["number"]))
                 return f"Declined {item['branch']} at {item['sha'][:7]}", True
             return ask(item["workflow"], f"Decline {what}?", "Decline", "Keep it", lambda: queue.carry_out(row, "declining", decline))
@@ -1393,17 +1393,17 @@ def read(path):
 
 
 def install():
-    """This as ~/runnerdeck.py, and `runnerdeck` in the shell's rc to open it.
+    """This as ~/runner.py, and `runner` in the shell's rc to open it.
     Not in a login file: opening it at every login would start the runners
     with it."""
-    target = os.path.expanduser("~/runnerdeck.py")
+    target = os.path.expanduser("~/runner.py")
     if os.path.abspath(__file__) != target:
         shutil.copyfile(__file__, target)
     rc = os.path.expanduser("~/.zshrc" if os.path.basename(os.environ.get("SHELL", "")) == "zsh" else "~/.bashrc")
-    if "runnerdeck.py" not in read(rc):
+    if "runner.py" not in read(rc):
         with open(rc, "a") as file:
-            file.write(f"\n# runnerdeck: starts the runners and shows them\nalias runnerdeck='{sys.executable} ~/runnerdeck.py'\n")
-    print(f"{target}; `runnerdeck` opens it, in a new shell or after `source {rc}`.")
+            file.write(f"\n# runner: starts the runners and shows them\nalias runner='{sys.executable} ~/runner.py'\n")
+    print(f"{target}; `runner` opens it, in a new shell or after `source {rc}`.")
 
 
 def init():
@@ -1413,7 +1413,7 @@ def init():
     os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
     with open(CONFIG, "w") as file:
         file.write(EXAMPLE)
-    print(f"{CONFIG} written: edit it, then run runnerdeck.py again.")
+    print(f"{CONFIG} written: edit it, then run runner.py again.")
 
 
 def machines(once=False):
@@ -1435,7 +1435,7 @@ def main(args):
     try:
         load()
     except (ConfigError, ValueError) as err:
-        sys.exit(f"runnerdeck: {err}")
+        sys.exit(f"runner: {err}")
     runners = [Runner(n) for n in range(1, LOCAL["count"] + 1)] if LOCAL else []
     if "--install" in args:
         install()
