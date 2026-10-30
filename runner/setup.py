@@ -240,12 +240,21 @@ class Wizard:
                 "label": (a["workflows"][0].lower().replace(" ", "-") + "-request") if a["workflows"] else "",
                 "command": "y"}.get(step, "")
 
+    def missing_runners(self):
+        """The numbers of the runners that are not set up yet: no .runner file in their folder."""
+        a = self.answers
+        base = os.path.expanduser(a["dir"])
+        return [n for n in range(1, a["count"] + 1)
+                if not os.path.exists(os.path.join(base if n == 1 else f"{base}-{n}", ".runner"))]
+
     def after(self):
         a, step = self.answers, self.step
-        return {"repos": "count", "name": "dir", "local_repo": "token", "token": "other", "ssh": "service",
+        # A token is for registering a runner: asked only when one is missing.
+        registering = "token" if self.missing_runners() else "other"
+        return {"repos": "count", "name": "dir", "local_repo": registering, "token": "other", "ssh": "service",
                 "service": "approval", "workflows": "label", "label": "command", "command": "review",
                 "count": "name" if a["count"] else "other",
-                "dir": "local_repo" if len(a["repos"]) > 1 else "token",
+                "dir": "local_repo" if len(a["repos"]) > 1 else registering,
                 "other": "ssh" if a["other"] else "approval",
                 "approval": "workflows" if a["approval"] else "command"}[step]
 
@@ -376,7 +385,7 @@ class Wizard:
             "name": ["What name do the runners get?", f"They are called {a['name']}, {a['name']}-2, {a['name']}-3 and so on."],
             "dir": ["In which folder do the runners live?", "The second runner gets the same name with -2 after it."],
             "local_repo": ["For which repository are the new runners?"],
-            "token": ["Paste the registration token.", "Get it here: Settings > Actions > Runners > New self-hosted runner.",
+            "token": ["Paste the registration token. It is for the runners that are not set up yet.", "Get it here: Settings > Actions > Runners > New self-hosted runner.",
                       "Leave it empty to ask gh. This works only if you are an admin of the repository.",
                       "The token is shown as dots and is not saved."],
             "other": ["Do you also want to see a second computer on this screen?",

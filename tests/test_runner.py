@@ -245,13 +245,14 @@ with tempfile.TemporaryDirectory() as tmp:
                                make=lambda cfg, n, token: made.append((cfg.local["name"], n, token)), path=path)
 
     # the whole way, with every question answered
+    runner_dir = os.path.join(tmp, "r")
     w = wizard_for()
     assert w.step == "welcome" and w.gh == (True, True)
     answer(w)
     answer(w, "a/b, c/d")
     answer(w, "2")
     answer(w, "box")
-    answer(w)                                   # the folder: what is offered
+    answer(w, runner_dir)                       # the folder: none of the runners is there yet
     answer(w)                                   # the repository of the runners: the first
     answer(w, "ABCDEFGH12345")
     w.feed(ord("y"))                            # another machine
@@ -274,7 +275,7 @@ with tempfile.TemporaryDirectory() as tmp:
     answer(w)
     assert w.finished and not w.cancelled and w.cfg.repos == ["a/b", "c/d"]
     written = open(path).read()
-    assert written == ("[deck]\nrepos = a/b, c/d\n\n[local]\nname = box\ndir = ~/actions-runner\ncount = 2\nrepo = a/b\n\n"
+    assert written == ("[deck]\nrepos = a/b, c/d\n\n[local]\nname = box\ndir = " + runner_dir + "\ncount = 2\nrepo = a/b\n\n"
                        "[host my-pc]\nssh = me@my-pc\nservice = x.service\n\n[approval]\nworkflows = Deploy\nlabel = deploy-request\n"), written
     assert "ABCDEFGH12345" not in written and configmod.load(path).local["count"] == 2   # the token is not kept
 
@@ -367,6 +368,14 @@ with tempfile.TemporaryDirectory() as tmp:
             assert w.step == "dir" and w.field == "~/actions-runner"
             answer(w)
             assert w.step == "local_repo" and w.field == "o/app"
+            assert w.missing_runners() == []                                   # all three are there: no token is asked
+            answer(w)
+            assert w.step == "other", w.step
+            w.feed(27); w.feed(27); w.feed(27); w.feed(27)                     # back to the number of runners
+            assert w.step == "count"
+            answer(w, "4")                                                     # a fourth is missing: now a token is asked
+            answer(w); answer(w); answer(w)
+            assert w.step == "token" and w.missing_runners() == [4]
         finally:
             os.environ["HOME"] = before if before is not None else ""
             if before is None:
@@ -438,7 +447,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # a token that is not one is refused; none at all asks gh later
     w = wizard_for()
-    answer(w); answer(w, "a/b"); answer(w, "1"); answer(w); answer(w)
+    answer(w); answer(w, "a/b"); answer(w, "1"); answer(w); answer(w, os.path.join(tmp, "none"))
     assert w.step == "token"
     answer(w, "bad token!")
     assert w.step == "token" and w.bad
