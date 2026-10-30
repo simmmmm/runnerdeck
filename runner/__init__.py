@@ -1,0 +1,47 @@
+"""runner: self-hosted GitHub Actions runners, the machines they run on and
+the runs they work on, on one btop-style screen in the terminal.
+
+    runner --init      write an example config, then edit it
+    runner                   start the local runners that are not running, then the screen
+    runner --status    the screen once, as text
+    runner --install   copy this to ~/runner.py, and `runner` in your shell
+
+What it shows: this machine (CPU, GPU, memory, power, heat; macOS or Linux),
+other machines over ssh, the runners on this machine (what each is doing and how
+far its job is), the last runs of your repositories, and the log of one runner.
+↑ and ↓ go over the runs; c cancels one, r runs it again, o opens it. What
+cannot be taken back asks first, in a box in the middle.
+
+Add a repository, say what runners it has, and that is all: a config file
+(~/.config/runner/config.ini, or RUNNER_CONFIG), see --init.
+
+    [deck]
+    repos = owner/name, owner/other        # what `gh` reads runs from
+
+    [local]                                # runners on this machine (optional)
+    name = box                             # box, box-2, box-3
+    dir = ~/actions-runner                 # ~/actions-runner, -2, -3
+    count = 3
+    version = 2.338.2                      # a new runner's first; each updates itself
+    keychain = ~/Library/Keychains/login.keychain-db   # macOS: unlocked before they start
+
+    [host pc]                              # another machine, read-only, over ssh
+    ssh = user@host                        # key login: BatchMode, never a password
+    service = actions-runner.service       # its runner, a systemd user service
+
+    [approval]                             # workflows only a person may start
+    workflows = Deploy                     # an issue "Deploy: <branch> <sha>" ...
+    label = deploy-request                 # ... with this label stands on the screen as waiting
+
+Nothing here starts an approval workflow by itself: an issue only asks; a or
+enter in the screen starts it, after a question, from that branch if it is
+still at that commit, and closes the issue.
+
+Local runners run apart from the screen, in sessions of their own, so leaving it
+(q) or losing the SSH connection leaves them running; x stops them. A watcher
+(--watch) beside them notifies for every job that ends (osascript, or
+notify-send) and writes it to jobs.log in the first runner's folder.
+
+Python 3.9 and its standard library only. `python3 -m runner --build runner.pyz` makes one file of it:
+copy that anywhere.
+"""

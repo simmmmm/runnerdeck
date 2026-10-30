@@ -11,17 +11,19 @@ they work on, on one btop-style screen in the terminal.
 - **Approval:** workflows only a person may start. An issue asks for one; you
   start it from the screen, after a question, or decline it.
 
-One file, Python 3.9 and its standard library only, on macOS, Linux and Windows. Needs [`gh`](https://cli.github.com)
+A small package (`runner/`, one module for each part), Python 3.9 and its standard library only, on
+macOS, Linux and Windows. `--build` makes one file of it, `runner.pyz`, to copy anywhere. Needs [`gh`](https://cli.github.com)
 for the runs, and ssh keys for other machines (never a password prompt).
 
 ## Use
 
 ```
-python3 runner.py --init       # writes ~/.config/runner/config.ini
+python3 -m runner --init       # writes ~/.config/runner/config.ini
 $EDITOR ~/.config/runner/config.ini
-python3 runner.py              # starts local runners that are down, then the screen
-python3 runner.py --status     # the screen once, as text
-python3 runner.py --install    # copies itself to ~/runner.py and adds `runner`
+python3 -m runner              # starts local runners that are down, then the screen
+python3 -m runner --status     # the screen once, as text
+python3 -m runner --build runner.pyz   # one file of it, to copy anywhere: python3 runner.pyz
+python3 -m runner --install    # builds ~/runner.pyz and adds `runner` to your shell
 ```
 
 q leaves, the runners keep running. x stops them, s starts them.
