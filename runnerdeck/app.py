@@ -95,7 +95,7 @@ def show(window, cfg, runners, queue, machine, pcs=()):
                 dialog["focus"] = False
             elif key == 9:
                 dialog["focus"] = not dialog["focus"]
-            elif key == ord("y") or (key in ENTER and dialog["focus"]):
+            elif key == ord("y") or (key in ENTER and dialog["focus"]) or (key == ord("q") and dialog.get("quit")):
                 dialog["then"]()
                 dialog = None
                 if leaving:
@@ -106,11 +106,11 @@ def show(window, cfg, runners, queue, machine, pcs=()):
         if key == 27 and picked is not None:
             picked, note = None, ""
             continue
-        if key == 27:
+        if key in (ord("q"), 27):
+            # q and Esc are the same key here: both ask first. In the question another q says yes.
             dialog = ask("Leave", "Leave runnerdeck? The runners keep running.", "Leave", "Stay", leave)
+            dialog["quit"] = True
             continue
-        if key == ord("q"):
-            return
         requests, runs = queue.requests, queue.runs or []
         items = [*requests, *runs]
         if key in (K_UP, K_DOWN) and items:

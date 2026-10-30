@@ -681,7 +681,7 @@ if not system.WINDOWS:
         send("y", "This is the config file")
         send("\r", "Setup is done")
         send("\r", "gh did not answer")        # the main screen, saying why there are no runs
-        os.write(fd, b"q")
+        os.write(fd, b"qq")
         _, status = os.waitpid(pid, 0)
         assert os.WEXITSTATUS(status) == 0, status
         assert active(open(os.path.join(tmp, "c", "config.ini")).read()) == "[deck]\nrepos = owner/name\n"
@@ -767,6 +767,8 @@ if not system.WINDOWS:
         send("\r", "no runs")                              # back on the main screen
         send("\x1b", "Leave runnerdeck")                   # esc asks first: it is easy to press by mistake
         send("n", "no runs")                               # stay: the screen is back
+        send("q", "Leave runnerdeck")                      # q is the same key as esc here: it asks too
+        send("\x1b", "no runs")                            # esc in the question stays
         send("\x1b", "Leave runnerdeck")
         os.write(fd, b"y")                                 # leave
         _, status = os.waitpid(pid, 0)

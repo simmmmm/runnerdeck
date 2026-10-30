@@ -65,7 +65,7 @@ service = actions-runner.service
 
 | Key | Action |
 |---|---|
-| `q` | Leave. The runners keep running. |
+| `q` or `Esc` | Leave. It asks first. Press `q` again to say yes. The runners keep running. |
 | `n` | Add a new runner. |
 | `w` | Choose again which workflows wait for your yes. |
 | `s` / `x` | Start / stop the runners. |
