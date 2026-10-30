@@ -9,7 +9,7 @@ import subprocess
 import sys
 import textwrap
 import threading
-from .config import ConfigError, HOST, SLUG, WORD, configure, default_path
+from .config import ConfigError, HOST, REFERENCE, SLUG, WORD, configure, default_path, set_approval
 from .runners import Runner, TOKEN, find_runners, gh_token, plan_of, set_up
 from .terminal import K_BACKSPACE, K_DOWN, K_RESIZE, K_UP, Screen, colours, frame
 
@@ -30,6 +30,7 @@ STEPS = {
     "label": ("text", "Label"),
     "command": ("yesno", "The runner command"),
     "review": ("info", "Check the config"),
+    "save": ("info", "Saved"),
     "work": ("info", "Setting up the runners"),
     "done": ("info", "Done"),
 }
@@ -93,14 +94,16 @@ def config_text(answers):
             text += f"service = {answers['service']}\n"
     if answers["approval"]:
         text += f"\n[approval]\nworkflows = {', '.join(answers['workflows'])}\nlabel = {answers['label']}\n"
-    return text
+    return text + "\n" + REFERENCE
 
 
 class Wizard:
     """The questions as a machine that is fed keys and shows a view: the screen
     only draws it, so it can be tested without a terminal."""
 
-    def __init__(self, checks=None, install=None, make=None, path=None, finder=None):
+    def __init__(self, checks=None, install=None, make=None, path=None, finder=None, start="welcome", seed=None,
+                 typed=None, mode="setup"):
+        self.mode, self.saved = mode, False
         self.checks = checks or Checks()
         self.finder = finder or find_runners
         self.install = install
@@ -110,7 +113,8 @@ class Wizard:
         self.answers = {"repos": [], "count": 0, "name": name, "dir": "~/actions-runner", "local_repo": "", "token": "",
                         "other": False, "ssh": "", "host_name": "pc", "service": "", "approval": False,
                         "workflows": [], "label": "", "command": True}
-        self.step, self.history, self.typed = "welcome", [], {}
+        self.answers.update(seed or {})
+        self.step, self.history, self.typed = start, [], dict(typed or {})
         self.field, self.note, self.bad, self.kept, self.fresh = "", "", False, False, False
         self.cfg = self.installed = self.problem = None
         self.finished = self.cancelled = self.working = False
@@ -120,6 +124,14 @@ class Wizard:
         # The workflows to choose from, which of them, and how many names the program cannot use.
         self.options, self.cursor, self.picked, self.skipped = [], 0, set(), 0
         self.enter()
+
+    @classmethod
+    def for_approval(cls, cfg, checks=None, path=None):
+        """Only the workflows that wait for a yes, chosen again from the list, for a
+        config that is there already. What is set now is chosen to begin with."""
+        typed = {"label": cfg.approval["label"]} if cfg.approval["label"] else None
+        return cls(checks, path=path, start="workflows", mode="approval", typed=typed,
+                   seed={"repos": cfg.repos, "workflows": list(cfg.approval["workflows"])})
 
     # ---- moving between steps
     def enter(self):
@@ -140,9 +152,19 @@ class Wizard:
             self.cursor = 0
             chosen = self.answers["workflows"]
             self.picked = {i for i, name in enumerate(self.options) if name in chosen}
+        elif self.step == "save":
+            self.save()
         elif self.step == "work":
             self.working = True
             threading.Thread(target=self.work, daemon=True).start()
+
+    def save(self):
+        a = self.answers
+        try:
+            set_approval(self.path, a["workflows"], a["label"])
+            self.saved = True
+        except (ConfigError, OSError) as err:
+            self.note, self.bad = f"Not saved: {err}", True
 
     def remember(self):
         """What was typed stays when the step is left and come back to. What was only
@@ -194,7 +216,7 @@ class Wizard:
             elif key == 32:
                 self.picked ^= {self.cursor}
             elif key in (10, 13, 343):
-                if not self.picked:
+                if not self.picked and self.mode != "approval":
                     self.note, self.bad = "Choose at least one with the space bar. Or press Esc and answer n.", True
                 else:
                     self.answers["workflows"] = [self.options[i] for i in sorted(self.picked)]
@@ -244,7 +266,7 @@ class Wizard:
         first = [self.plan["repo"]] if self.plan and self.plan["repo"] else []
         repos = list(dict.fromkeys(first + [item["repo"] for item in self.found if item["repo"]]))
         return {"repos": ", ".join(repos), "count": str(self.plan["count"]) if self.plan else "0", "name": a["name"], "dir": a["dir"], "local_repo": self.plan["repo"] if self.plan and self.plan["repo"] in a["repos"] else (a["repos"] or [""])[0],
-                "token": "", "other": "n", "ssh": "", "service": "", "approval": "n", "workflows": "",
+                "token": "", "other": "n", "ssh": "", "service": "", "approval": "n", "workflows": ", ".join(a["workflows"]),
                 "label": (a["workflows"][0].lower().replace(" ", "-") + "-request") if a["workflows"] else "",
                 "command": "y"}.get(step, "")
 
@@ -260,7 +282,9 @@ class Wizard:
         # A token is for registering a runner: asked only when one is missing.
         registering = "token" if self.missing_runners() else "other"
         return {"repos": "count", "name": "dir", "local_repo": registering, "token": "other", "ssh": "service",
-                "service": "approval", "workflows": "label", "label": "command", "command": "review",
+                "service": "approval", "command": "review",
+                "workflows": "label" if self.mode == "setup" or a["workflows"] else "save",
+                "label": "command" if self.mode == "setup" else "save",
                 "count": "name" if a["count"] else "other",
                 "dir": "local_repo" if len(a["repos"]) > 1 else registering,
                 "other": "ssh" if a["other"] else "approval",
@@ -306,7 +330,7 @@ class Wizard:
             return "Write a service name, like actions-runner.service. Or leave it empty.", None, None
         if step == "workflows":
             names = [w.strip() for w in value.split(",") if w.strip()]
-            if not names or not all(WORD.match(w) for w in names):
+            if (not names and self.mode == "setup") or not all(WORD.match(w) for w in names):
                 return "Write the workflow names, with a comma between them.", None, None
             return None, None, names
         if step == "label" and not WORD.match(value):
@@ -413,14 +437,18 @@ class Wizard:
                       "To ask for a start, a person or a tool opens an issue with this label.",
                       "The title of the issue is the workflow name, a branch and a commit. For example: "
                       + (a["workflows"] or ["Deploy"])[0] + ": main a0d3a70"],
+            "save": (["Saved.", "", "These workflows wait for your yes: " + (", ".join(a["workflows"]) or "none"),
+                     f"The old file is kept as {os.path.basename(self.path)}.bak."] if self.saved else ["The file was not changed."]),
             "command": ["Do you want a `runner` command in your terminal?",
                         "The program copies itself to your home folder (runner.pyz) and adds one line to your shell file."],
-            "review": ["This is the config file:", ""] + config_text(a).splitlines() + ["", f"Enter writes it to {self.path}"]
+            "review": ["This is the config file:", ""] + config_text(a).split("\n# ---- ")[0].splitlines()
+                      + ["", "At the foot it lists all other options, as comments.", f"Enter writes it to {self.path}"]
                       + ([f"The old file is kept as {os.path.basename(self.path)}.bak"] if os.path.exists(self.path) else []),
             "work": [] + [item for item in self.progress] + ([] if self.working else ["", "Press Enter."]),
             "done": ["Setup is done.", ""] + ([("good", item) for item in (self.installed or "").splitlines()] if self.installed
                                                else ["Start the program again with: python3 -m runner"])
-                    + ([("bad", self.problem)] if self.problem else []),
+                    + ([("bad", self.problem)] if self.problem else [])
+                    + ["", f"Your config file is {self.path}", "Read it with: cat " + self.path, self.open_tip()],
         }[step]
 
     def pick_text(self):
@@ -437,6 +465,14 @@ class Wizard:
             rows.append(("warm", f"   {self.skipped} more have names with characters the program cannot use."))
         return rows
 
+    def open_tip(self):
+        """How to open the file in the file manager of this system."""
+        if platform.system() == "Darwin":
+            return "Or show it in Finder: open -R " + self.path
+        if platform.system() == "Windows":
+            return "Or show it in Explorer: explorer /select," + self.path
+        return "Or open its folder: xdg-open " + os.path.dirname(self.path)
+
     def view(self):
         kind, title = self.kind(), STEPS[self.step][1]
         hint = {"info": "enter: next · esc: back", "text": "enter: next · esc: back",
@@ -446,6 +482,8 @@ class Wizard:
             hint = "wait…"
         if self.step == "done":
             hint = "enter: open the screen"
+        if self.step == "save":
+            hint = "enter: back to the screen · esc: back"
         return {"title": title, "lines": self.text(), "field": self.field if kind == "text" else None,
                 "secret": self.step == "token", "fresh": self.fresh, "hint": hint, "note": self.note, "bad": self.bad}
 

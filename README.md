@@ -39,7 +39,7 @@
 
 The first time, the program asks a few questions. It writes the config file for you. It can also make a `runner` command and set up the runners on this machine. When it is done, open a new terminal window and type `runner`.
 
-To ask the questions again, use `--setup`. To edit the file by hand, see [Config](docs/config.md). To see the screen one time, as text, and start nothing, use `--status`.
+To ask the questions again, use `--setup`. The config file is plain text. It lists all the options at its foot, as comments. Read it with `cat ~/.config/runner/config.ini`, or find it in your file manager. See also [Config](docs/config.md). To see the screen one time, as text, and start nothing, use `--status`.
 
 ## Example
 
@@ -65,6 +65,7 @@ service = actions-runner.service
 |---|---|
 | `q` | Leave. The runners keep running. |
 | `n` | Add a new runner. |
+| `w` | Choose again which workflows wait for your yes. |
 | `s` / `x` | Start / stop the runners. |
 | `Tab` | Show the log of the next runner. |
 | `↑` `↓` | Choose a run. |

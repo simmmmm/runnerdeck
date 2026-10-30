@@ -10,6 +10,10 @@ label = deploy-request
 
 The setup asks `gh` for the workflows of your repositories and lets you choose from the list. Move with the arrow keys, choose with the space bar, and press Enter. If `gh` gives no list, you write the names.
 
+## Change it later
+
+Press `w` on the main screen. The list of workflows opens again, and the ones that wait for your yes are already chosen. Change them with the space bar and press Enter. The program changes only the `[approval]` section of the file. The rest stays as it is, comments too. The old file is kept as `config.ini.bak`. If you choose none, the section is taken out.
+
 ## How it works
 
 1. A person or a tool opens an issue. The issue has the label from the config file.

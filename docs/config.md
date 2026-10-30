@@ -2,6 +2,8 @@
 
 The file is `~/.config/runner/config.ini`. Set `RUNNER_CONFIG` to use another file.
 
+Every file that the program writes has a list of all the options at its foot, as comments. Remove the `#` in front of a line to use it. Read the file with `cat`, or show it in your file manager: `open -R ~/.config/runner/config.ini` on macOS, `xdg-open ~/.config/runner` on Linux.
+
 You do not have to write the file yourself. The program asks the questions the first time. `python3 -m runner --setup` asks them again, and keeps the old file as `config.ini.bak`. `python3 -m runner --init` writes an example file for you to edit.
 
 The program checks the file when it reads it. A wrong value stops the start, with a message.

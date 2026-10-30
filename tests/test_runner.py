@@ -20,6 +20,11 @@ def configured(text):
     return configmod.configure(config)
 
 
+def active(text):
+    """A config file without the list of all options that the program writes at its foot."""
+    return text.split("\n# ---- ", 1)[0].rstrip("\n") + "\n"
+
+
 def refuses(text, word):
     try:
         configured(text)
@@ -92,6 +97,7 @@ assert both["gpu"] == 10 and both["gpu_temp"] == 70 and both["vram"] == (1.0, 2.
 
 # --- the runner's download, by platform
 import platform
+real_platform = platform.system, platform.machine
 for os_name, arch, ending in (("Darwin", "arm64", "osx-arm64-%s.tar.gz"), ("Linux", "x86_64", "linux-x64-%s.tar.gz"),
                                 ("Linux", "aarch64", "linux-arm64-%s.tar.gz"), ("Windows", "AMD64", "win-x64-%s.zip"),
                                 ("Windows", "ARM64", "win-arm64-%s.zip")):
@@ -103,7 +109,7 @@ try:
     raise AssertionError("a platform with no runner")
 except OSError:
     pass
-del platform.system, platform.machine  # back to the real ones
+platform.system, platform.machine = real_platform  # back to the real ones
 
 # --- the keys are curses' own numbers, so that Windows can say the same
 if terminal.curses:
@@ -186,7 +192,7 @@ else:
         out = subprocess.run([sys.executable, "-m", "runner", "--init"], env=env, cwd=ROOT, capture_output=True, text=True)
         assert out.returncode == 0 and os.path.exists(env["RUNNER_CONFIG"]), out.stderr
         cfg = configured(open(env["RUNNER_CONFIG"]).read())
-        assert cfg.repos == ["owner/name"] and cfg.local["count"] == 1
+        assert cfg.repos == ["owner/name"] and cfg.local is None      # watch only: an example must not set up runners
 
 
     assert "creationflags" not in system.apart() and system.exists(os.getpid()) and not system.exists(2**22 + 12345)
@@ -275,8 +281,22 @@ with tempfile.TemporaryDirectory() as tmp:
     answer(w)
     assert w.finished and not w.cancelled and w.cfg.repos == ["a/b", "c/d"]
     written = open(path).read()
-    assert written == ("[deck]\nrepos = a/b, c/d\n\n[local]\nname = box\ndir = " + runner_dir + "\ncount = 2\nrepo = a/b\n\n"
+    assert active(written) == ("[deck]\nrepos = a/b, c/d\n\n[local]\nname = box\ndir = " + runner_dir + "\ncount = 2\nrepo = a/b\n\n"
                        "[host my-pc]\nssh = me@my-pc\nservice = x.service\n\n[approval]\nworkflows = Deploy\nlabel = deploy-request\n"), written
+    # every file the program writes lists all the options at its foot, as comments
+    for section in ("[deck]", "[local]", "[host pc]", "[approval]", "[names]"):
+        assert "\n# " + section + "\n" in written, section
+    for option in ("repos", "name", "dir", "count", "repo", "version", "keychain", "ssh", "service", "workflows", "label"):
+        assert "\n# " + option + " = " in written, option
+    assert "\n# [approval]\n" in written and configmod.load(path).approval["label"] == "deploy-request"
+    # the key w changes only the approval section: the list at the foot is left as it is
+    configmod.set_approval(path, ["Ship it"], "ship-request")
+    after = open(path).read()
+    assert "\nworkflows = Ship it" in active(after) and "workflows = Deploy" not in active(after)
+    assert after.split("\n# ---- ", 1)[1] == written.split("\n# ---- ", 1)[1]
+    configmod.set_approval(path, [], "")
+    assert "[approval]\n" not in active(open(path).read()) and open(path).read().split("\n# ---- ", 1)[1] == written.split("\n# ---- ", 1)[1]
+    open(path, "w").write(written)                                              # as it was, for what follows
     assert "ABCDEFGH12345" not in written and configmod.load(path).local["count"] == 2   # the token is not kept
 
     # what is offered goes at the first key typed; backspace edits it instead
@@ -338,6 +358,51 @@ with tempfile.TemporaryDirectory() as tmp:
     assert w.step == "workflows" and w.kind() == "text" and "did not list any" in str(w.text())
     answer(w, "TestFlight, Build")
     assert w.step == "label" and w.answers["workflows"] == ["TestFlight", "Build"]
+
+    # the approval section alone: set, replaced, taken out; the rest of the file as it was
+    original = ("# my runners\n[deck]\nrepos = a/b\n\n# the PC\n[host pc]\nssh = me@pc\nservice = x.service\n")
+    plain = os.path.join(tmp, "edit.ini")
+    open(plain, "w").write(original)
+    configmod.set_approval(plain, ["Deploy", "Ship it"], "ask")
+    assert open(plain).read() == original + "\n[approval]\nworkflows = Deploy, Ship it\nlabel = ask\n"
+    assert open(plain + ".bak").read() == original
+    with_comments = ("[deck]\nrepos = a/b\n\n# a start is yours\n[approval]\nworkflows = Old\nlabel = old-request\n\n"
+                     "# the jobs\n[names]\nbuild = Build\n")
+    open(plain, "w").write(with_comments)
+    configmod.set_approval(plain, ["TestFlight"], "testflight-request")
+    assert open(plain).read() == ("[deck]\nrepos = a/b\n\n# a start is yours\n[approval]\nworkflows = TestFlight\n"
+                                  "label = testflight-request\n\n# the jobs\n[names]\nbuild = Build\n"), open(plain).read()
+    configmod.set_approval(plain, [], "")
+    assert "[approval]" not in open(plain).read() and "[names]\nbuild = Build" in open(plain).read()
+    assert configmod.load(plain).approval == {"workflows": [], "label": ""}
+    before = open(plain).read()
+    try:
+        configmod.set_approval(plain, ["Bad & Name"], "ask")
+        raise AssertionError("a name the program cannot use")
+    except configmod.ConfigError:
+        pass
+    assert open(plain).read() == before                                       # put back as it was
+
+    # the same questions again, for a config that is there: what is set is chosen to begin with
+    cfg_now = configured("[deck]\nrepos = a/b\n[approval]\nworkflows = TestFlight\nlabel = testflight-request\n")
+    open(plain, "w").write("[deck]\nrepos = a/b\n[approval]\nworkflows = TestFlight\nlabel = testflight-request\n")
+    w = setupmod.Wizard.for_approval(cfg_now, Checks(workflows={"a/b": ["CI", "Build", "TestFlight"]}), path=plain)
+    assert w.step == "workflows" and w.kind() == "pick" and w.picked == {2}
+    w.feed(32)                                                                 # CI on as well
+    answer(w)
+    assert w.step == "label" and w.field == "testflight-request"
+    answer(w)
+    assert w.step == "save" and w.saved
+    assert configmod.load(plain).approval == {"workflows": ["CI", "TestFlight"], "label": "testflight-request"}
+    answer(w)
+    assert w.finished and not w.cancelled
+    w = setupmod.Wizard.for_approval(cfg_now, Checks(workflows={"a/b": ["CI", "TestFlight"]}), path=plain)
+    w.feed(terminal.K_DOWN); w.feed(32)                                        # TestFlight off: none wait
+    answer(w)
+    assert w.step == "save" and w.saved and configmod.load(plain).approval == {"workflows": [], "label": ""}
+    w = setupmod.Wizard.for_approval(cfg_now, Checks(workflows={"a/b": ["CI"]}), path=plain)
+    w.feed(27)
+    assert w.finished and w.cancelled and not w.saved                          # escape at the start changes nothing
 
     # runners that are set up already are found, and offered as the answers
     with tempfile.TemporaryDirectory() as home:
@@ -412,7 +477,7 @@ with tempfile.TemporaryDirectory() as tmp:
     answer(w); answer(w, "a/b"); answer(w, "0"); w.feed(ord("n")); w.feed(ord("n")); w.feed(ord("n"))
     assert w.step == "review"
     answer(w)
-    assert w.step == "done" and made == [] and open(path).read() == "[deck]\nrepos = a/b\n"
+    assert w.step == "done" and made == [] and active(open(path).read()) == "[deck]\nrepos = a/b\n"
     assert open(path + ".bak").read() == written
     answer(w)
     assert w.finished
@@ -439,7 +504,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert w.step == "welcome"
     w.feed(27)
     assert w.finished and w.cancelled           # escape at the start stops it, and nothing was written for it
-    assert open(path).read() == "[deck]\nrepos = a/b\n"
+    assert active(open(path).read()) == "[deck]\nrepos = a/b\n"
 
     # a warning is said once; the same answer again keeps it
     w = wizard_for(ssh=False)
@@ -512,12 +577,71 @@ if not system.WINDOWS:
         os.write(fd, b"q")
         _, status = os.waitpid(pid, 0)
         assert os.WEXITSTATUS(status) == 0, status
-        assert open(os.path.join(tmp, "c", "config.ini")).read() == "[deck]\nrepos = owner/name\n"
+        assert active(open(os.path.join(tmp, "c", "config.ini")).read()) == "[deck]\nrepos = owner/name\n"
         assert os.path.getsize(os.path.join(tmp, "runner.pyz")) > 1000
         assert "alias runner=" in open(os.path.join(tmp, ".bashrc")).read()
         # And the program started again finds its config and does not ask.
         out = subprocess.run([sys.executable, "-m", "runner", "--status"], env=env, cwd=tmp, capture_output=True, text=True, timeout=60)
         assert out.returncode == 0 and "Welcome" not in out.stdout and "◐ runner" in out.stdout, out.stderr
+
+# --- the key w on the main screen opens the list again, and saves to the config that is there
+if not system.WINDOWS:
+    import pty, select, fcntl, termios, struct
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "gh"), "w") as file:
+            file.write('#!/bin/sh\ncase "$1 $2" in "workflow list") echo \'[{"name":"CI"},{"name":"Build"},{"name":"TestFlight"},'
+                       '{"name":"Screenshots"}]\'; exit 0;; esac\nexit 1\n')
+        os.chmod(os.path.join(tmp, "gh"), 0o755)
+        config_file = os.path.join(tmp, "config.ini")
+        open(config_file, "w").write("# mine\n[deck]\nrepos = owner/name\n\n[approval]\nworkflows = TestFlight\nlabel = testflight-request\n")
+        env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"], HOME=tmp, TERM="xterm-256color",
+                   RUNNER_CONFIG=config_file, RUNNER_HOME=tmp, PYTHONPATH=ROOT)
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.chdir(tmp)
+            os.execvpe(sys.executable, [sys.executable, "-m", "runner"], env)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 110, 0, 0))
+        seen = ""
+
+        def pump(seconds):
+            global seen
+            end = time.time() + seconds
+            while time.time() < end:
+                ready, _, _ = select.select([fd], [], [], 0.1)
+                if ready:
+                    try:
+                        seen += os.read(fd, 65536).decode("utf-8", "replace")
+                    except OSError:
+                        return
+
+        def until(word, seconds=20):
+            end = time.time() + seconds
+            while time.time() < end:
+                if word in seen:
+                    return
+                pump(0.2)
+            raise AssertionError(f"never saw {word!r}; the end was: {seen[-300:]!r}")
+
+        def send(text, then):
+            global seen
+            seen = ""
+            os.write(fd, text.encode())
+            until(then)
+
+        until("approval")                                  # the footer says there is a key for it
+        send("w", "Which workflows must wait")
+        assert "[x] TestFlight" in seen and "[ ] CI" in seen   # what is set is chosen to begin with
+        seen = ""
+        os.write(fd, b" ")                                 # CI on
+        pump(1.0)
+        send("\r", "Which label")
+        send("\r", "Saved.")
+        send("\r", "no runs")                              # back on the main screen
+        os.write(fd, b"q")
+        _, status = os.waitpid(pid, 0)
+        assert os.WEXITSTATUS(status) == 0
+        assert open(config_file).read() == ("# mine\n[deck]\nrepos = owner/name\n\n[approval]\nworkflows = CI, TestFlight\n"
+                                            "label = testflight-request\n"), open(config_file).read()
 
 # --- one file from the package: it runs, and what it starts again (the watcher) finds itself
 with tempfile.TemporaryDirectory() as tmp:

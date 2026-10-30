@@ -138,6 +138,17 @@ def show(window, cfg, runners, queue, machine, pcs=()):
             start_all(cfg, runners)
             window.back()
             note = ""
+        elif key == ord("w"):
+            # The workflows that wait for a yes, chosen again, for the config that is there.
+            wizard = Wizard.for_approval(cfg)
+            run_setup(window, wizard)
+            if wizard.saved:
+                try:
+                    fresh = load()
+                    cfg.approval, cfg.asked = fresh.approval, fresh.asked
+                    queue.said = "Saved. Waiting for your yes: " + (", ".join(cfg.approval["workflows"]) or "no workflow")
+                except (ConfigError, ValueError) as err:
+                    queue.said = f"The file is saved, but cannot be read: {err}"
         elif key == ord("n"):
             def make(token):
                 def work():

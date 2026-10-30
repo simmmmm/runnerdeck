@@ -2,34 +2,52 @@
 import configparser
 import os
 import re
+import shutil
 
 SLUG = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$")
 HOST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@:-]*$")
-EXAMPLE = """\
-[deck]
-repos = owner/name
-
-# Runners on this machine, started and stopped from the screen. Leave the
-# section out to only watch.
-[local]
-name = box
-dir = ~/actions-runner
-count = 1
-version = 2.338.2
+# Everything the file can say, as comments: written at the foot of every file the
+# program makes, to read with cat or in a file manager. Explanations are on their own
+# lines: a # after a value would become a part of the value.
+REFERENCE = """\
+# ---- All the options. Remove the # in front of a line to use it. ----
+#
+# [deck]
+# The repositories. Runs and requests are read from these. Required.
+# repos = owner/name, owner/other
+#
+# [local]
+# The runners on this machine: name, name-2, name-3 in the folders dir, dir-2, dir-3.
+# Leave the section out to only watch.
+# name = box
+# dir = ~/actions-runner
+# count = 3
+# The repository for new runners. The first in [deck] repos if you leave it out.
+# repo = owner/name
+# The first runner version to download. Each runner updates itself.
+# version = 2.338.2
+# macOS: this keychain is unlocked before the runners start.
 # keychain = ~/Library/Keychains/login.keychain-db
-
-# Another machine, over ssh (a key, no password). Leave out if there is none.
+#
 # [host pc]
-# ssh = user@host
+# Another computer, read over ssh with a key (never a password). One section for each.
+# It must run Linux for now. Its runner is a systemd user service.
+# ssh = user@pc
 # service = actions-runner.service
-
-# Workflows that only you may start: an issue titled "Deploy: <branch> <sha>"
-# with the label asks for one, and waits on the screen.
+#
 # [approval]
-# workflows = Deploy
+# Workflows that start only after you say yes. An issue with the label and a title
+# like "Deploy: main a0d3a70" asks for one. The key w on the screen changes these.
+# workflows = Deploy, Ship it
 # label = deploy-request
+#
+# [names]
+# Short names for jobs in the notifications.
+# build = Build
+# check = CI
 """
+EXAMPLE = "[deck]\nrepos = owner/name\n\n" + REFERENCE
 
 
 class ConfigError(Exception):
@@ -116,3 +134,41 @@ def load(path=None):
     if not config.read(path):
         raise NoConfig(f"no config at {path}. Start the program in a terminal to set it up, or run: python3 -m runner --init")
     return configure(config)
+
+
+def set_approval(path, workflows, label):
+    """The [approval] section of a config file set, or taken out when there are no
+    workflows. The rest of the file stays as it is, comments too. The old file is kept
+    as .bak, and put back if the new one is not a good config."""
+    with open(path) as file:
+        lines = file.read().split("\n")
+    start = next((i for i, line in enumerate(lines) if line.strip().lower() == "[approval]"), None)
+    if start is None:
+        start = end = len(lines)
+    else:
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
+        # The section is its header and its settings. Blank lines and comments after the
+        # last setting are not its: they are the next section's, or a note at the foot.
+        while end - 1 > start and (not lines[end - 1].strip() or lines[end - 1].lstrip().startswith("#")):
+            end -= 1
+        # The comment lines right above the header go with the section when it is taken out.
+        while not workflows and start > 0 and lines[start - 1].lstrip().startswith("#"):
+            start -= 1
+    new = ["[approval]", f"workflows = {', '.join(workflows)}", f"label = {label}"] if workflows else []
+    if new and start == end:
+        # A section that was not there: after the last setting, before any comments at the foot.
+        last = max((i for i, line in enumerate(lines) if line.strip() and not line.lstrip().startswith("#")), default=-1)
+        start = end = last + 1
+        new = [""] + new
+    lines[start:end] = new
+    if not new and 0 < start < len(lines) and not lines[start - 1].strip() and not lines[start].strip():
+        del lines[start]
+    text = "\n".join(lines).rstrip("\n") + "\n"
+    shutil.copyfile(path, path + ".bak")
+    try:
+        with open(path, "w") as file:
+            file.write(text)
+        load(path)
+    except (ConfigError, OSError):
+        shutil.copyfile(path + ".bak", path)
+        raise

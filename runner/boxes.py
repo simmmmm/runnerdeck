@@ -251,7 +251,7 @@ def footer(canvas, y, width, note, picking=None):
             "request": (("↑↓", "choose"), ("enter", "start"), ("d", "decline"), ("esc", "back")),
             "dialog": (("y", "yes"), ("n", "no"), ("← →", "choose"), ("enter", "answer")),
             "field": (("enter", "set up"), ("esc", "cancel")),
-            None: (("q", "leave, they keep running"), ("s", "start"), ("x", "stop"), ("n", "new runner"), ("tab", "another log"), ("↑↓", "choose"))}[picking]
+            None: (("q", "quit, runners stay on"), ("s", "start"), ("x", "stop"), ("n", "new runner"), ("w", "approval"), ("tab", "next log"), ("↑↓", "runs"))}[picking]
     for key, words in keys:
         canvas.put(y, x, key, "strong")
         canvas.put(y, x + len(key) + 1, words, "label")
