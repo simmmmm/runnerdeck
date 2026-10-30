@@ -455,6 +455,105 @@ with tempfile.TemporaryDirectory() as tmp:
     w.feed(27)
     assert w.finished and w.cancelled and not w.saved                          # escape at the start changes nothing
 
+    # a computer is added to the config: its section only, the rest of the file as it was
+    hosted = os.path.join(tmp, "hosts.ini")
+    base = "# mine\n[deck]\nrepos = a/b\n\n# the jobs\n[names]\nbuild = Build\n"
+    open(hosted, "w").write(base + "\n" + configmod.REFERENCE)
+    configmod.set_host(hosted, "pc", "me@192.168.2.15", "x.service")
+    after = open(hosted).read()
+    assert "[deck]\nrepos = a/b\n\n# the jobs\n[names]\nbuild = Build\n\n[host pc]\nssh = me@192.168.2.15\nservice = x.service\n" in after
+    assert after.endswith(configmod.REFERENCE) or after.split("\n# ---- ", 1)[1] == configmod.REFERENCE.split("# ---- ", 1)[1]
+    cfg_hosts = configmod.load(hosted).hosts
+    assert [(h["name"], h["ssh"], h["service"]) for h in cfg_hosts] == [("pc", "me@192.168.2.15", "x.service")]
+    configmod.set_host(hosted, "nas", "me@nas.local")                       # a second one, next to the first
+    configmod.set_host(hosted, "pc", "me@10.0.0.5")                         # the same name: changed, not added twice
+    hosts = {h["name"]: (h["ssh"], h["service"]) for h in configmod.load(hosted).hosts}
+    assert hosts == {"pc": ("me@10.0.0.5", ""), "nas": ("me@nas.local", "")}, hosts
+    assert active(open(hosted).read()).count("[host pc]") == 1
+    configmod.set_section(hosted, "[host nas]", [])                          # taken out again
+    assert [h["name"] for h in configmod.load(hosted).hosts] == ["pc"] and "# the jobs\n[names]" in open(hosted).read()
+    before = open(hosted).read()
+    try:
+        configmod.set_host(hosted, "bad", "-oProxyCommand=x")
+        raise AssertionError("an address that is an option to ssh")
+    except configmod.ConfigError:
+        pass
+    assert open(hosted).read() == before
+
+    # the questions for one computer: the address is tried, then the service, then the name
+    now_cfg = configured("[deck]\nrepos = a/b\n")
+    open(plain, "w").write("[deck]\nrepos = a/b\n")
+    w = setupmod.Wizard.for_host(now_cfg, Checks(), path=plain, threaded=False)
+    assert w.step == "ssh" and w.mode == "host"
+    answer(w, "me@192.168.2.15")
+    assert w.step == "service"
+    answer(w, "x.service")
+    assert w.step == "hostname" and w.field == "pc"                          # an address of numbers is not a name
+    answer(w, "has space")
+    assert w.step == "hostname" and w.bad
+    answer(w, "nas-pc")
+    assert w.step == "save" and w.saved and w.answers["host_name"] == "nas-pc"
+    assert "Added: nas-pc" in " ".join(map(str, w.text()))
+    assert [(h["name"], h["ssh"]) for h in configmod.load(plain).hosts] == [("nas-pc", "me@192.168.2.15")]
+    answer(w)
+    assert w.finished and w.saved
+    for address, name in (("me@nas.local", "nas"), ("me@my-pc", "my-pc"), ("me@10.0.0.9", "pc"), ("me@fe80::1", "pc")):
+        w = setupmod.Wizard.for_host(now_cfg, Checks(), path=plain, threaded=False)
+        answer(w, address)
+        assert w.answers["host_name"] == name, (address, w.answers["host_name"])
+    w = setupmod.Wizard.for_host(now_cfg, Checks(ssh=False), path=plain, threaded=False)    # ssh says no: said once, then kept
+    answer(w, "me@pc")
+    assert w.step == "ssh" and "refuses the connection" in w.note
+    answer(w)
+    assert w.step == "service"
+    w = setupmod.Wizard.for_host(now_cfg, Checks(), path=plain, threaded=False)
+    w.feed(27)
+    assert w.finished and w.cancelled and not w.saved
+
+    # the repositories: added to and taken from; a name gh cannot see is refused; one that the runners need stays
+    repo_file = os.path.join(tmp, "repos.ini")
+    open(repo_file, "w").write("# mine\n[deck]\nrepos = a/b\n\n[local]\nname = box\ndir = ~/x\ncount = 1\nrepo = a/b\n")
+    now_cfg = configmod.load(repo_file)
+    w = setupmod.Wizard.for_repos(now_cfg, Checks(seen={"x/y": False}), path=repo_file, threaded=False)
+    assert w.step == "repos" and w.mode == "repos" and w.field == "a/b"          # what is watched is there to edit
+    answer(w, "a/b, x/y")
+    assert w.step == "repos" and w.bad and "cannot see x/y" in w.note
+    answer(w, "")
+    assert w.step == "repos" and w.bad
+    answer(w, "a/b, c/d")
+    assert w.step == "save" and w.saved and "Watching: a/b, c/d" in " ".join(map(str, w.text()))
+    assert configmod.load(repo_file).repos == ["a/b", "c/d"] and "# mine" in open(repo_file).read()
+    assert "[local]\nname = box" in open(repo_file).read()                        # the rest as it was
+    w = setupmod.Wizard.for_repos(configmod.load(repo_file), Checks(), path=repo_file, threaded=False)
+    kept = open(repo_file).read()
+    answer(w, "c/d")                                                              # the runners' repository a/b would be gone
+    assert w.step == "save" and not w.saved and "not in [deck] repos" in w.note and w.bad
+    assert open(repo_file).read() == kept                                         # the file is as it was
+
+    # the menu: a list on the screen, chosen with the arrows and Enter, or with a number
+    class Keys:
+        def __init__(self, keys):
+            self.keys = list(keys)
+
+        def size(self):
+            return 30, 100
+
+        def key(self, wait=1.0):
+            return self.keys.pop(0) if self.keys else 27
+
+    real_flush = terminal.Screen.flush
+    terminal.Screen.flush = lambda self: None
+    try:
+        things = ["add", "repos", "workflows"]
+        assert setupmod.menu(Keys([13]), "Settings", things) == 0
+        assert setupmod.menu(Keys([terminal.K_DOWN, 13]), "Settings", things) == 1
+        assert setupmod.menu(Keys([terminal.K_DOWN] * 9 + [13]), "Settings", things) == 2          # stops at the last
+        assert setupmod.menu(Keys([terminal.K_DOWN, terminal.K_UP, terminal.K_UP, 13]), "Settings", things) == 0
+        assert setupmod.menu(Keys([ord("3")]), "Settings", things) == 2 and setupmod.menu(Keys([ord("9")] + [27]), "Settings", things) is None
+        assert setupmod.menu(Keys([27]), "Settings", things) is None and setupmod.menu(Keys([ord("q")]), "Settings", things) is None
+    finally:
+        terminal.Screen.flush = real_flush
+
     # runners that are set up already are found, and offered as the answers
     with tempfile.TemporaryDirectory() as home:
         def registered(folder, name, repo, bom=True):
@@ -716,8 +815,11 @@ if not system.WINDOWS:
 if not system.WINDOWS:
     import pty, select, fcntl, termios, struct
     with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "ssh"), "w") as file:
+            file.write("#!/bin/sh\nexit 0\n")                # an ssh that connects, and says nothing
+        os.chmod(os.path.join(tmp, "ssh"), 0o755)
         with open(os.path.join(tmp, "gh"), "w") as file:
-            file.write('#!/bin/sh\ncase "$1 $2" in "workflow list") echo \'[{"name":"CI"},{"name":"Build"},{"name":"TestFlight"},'
+            file.write('#!/bin/sh\ncase "$1 $2" in "api repos/"*) echo ok; exit 0;; "workflow list") echo \'[{"name":"CI"},{"name":"Build"},{"name":"TestFlight"},'
                        '{"name":"Screenshots"}]\'; exit 0;; esac\nexit 1\n')
         os.chmod(os.path.join(tmp, "gh"), 0o755)
         config_file = os.path.join(tmp, "config.ini")
@@ -765,6 +867,18 @@ if not system.WINDOWS:
         send("\r", "Which label")
         send("\r", "Saved.")
         send("\r", "no runs")                              # back on the main screen
+        send("m", "Settings")                              # the menu: everything that can be changed
+        assert "Add a runner on this machine" in seen and "Remove a computer" in seen and "Where is the config file" in seen
+        send("\x1b", "no runs")                            # esc closes it
+        send("m", "Settings")
+        send("2", "Which repositories do you watch")       # a number chooses: the repositories, as they are now
+        send("owner/name, o/other\r", "Saved.")
+        send("\r", "no runs")
+        send("h", "SSH address")
+        send("me@192.168.2.15\r", "runner service")        # tried at once, then it asks for the service
+        send("\r", "What do you call this computer")
+        send("\r", "Saved.")
+        send("\r", "no runs")                              # back on the main screen, with the computer added
         send("\x1b", "Leave runnerdeck")                   # esc asks first: it is easy to press by mistake
         send("n", "no runs")                               # stay: the screen is back
         send("q", "Leave runnerdeck")                      # q is the same key as esc here: it asks too
@@ -773,8 +887,8 @@ if not system.WINDOWS:
         os.write(fd, b"y")                                 # leave
         _, status = os.waitpid(pid, 0)
         assert os.WEXITSTATUS(status) == 0
-        assert open(config_file).read() == ("# mine\n[deck]\nrepos = owner/name\n\n[approval]\nworkflows = CI, TestFlight\n"
-                                            "label = testflight-request\n"), open(config_file).read()
+        assert open(config_file).read() == ("# mine\n[deck]\nrepos = owner/name, o/other\n\n[approval]\nworkflows = CI, TestFlight\n"
+                                            "label = testflight-request\n\n[host pc]\nssh = me@192.168.2.15\n"), open(config_file).read()
 
 # --- the footer keeps the keys of the screen while something is chosen; a computer that did not answer has no
 # --- box; with two repositories every run and request says which one it is of
@@ -788,14 +902,14 @@ def footer_text(width, picking):
 
 
 for picking in ("run", "request", None):
-    wide = footer_text(160, picking)
-    for key in ("q quit", "n new runner", "w approval", "s start", "x stop", "tab next log"):
+    wide = footer_text(190, picking)
+    for key in ("q quit", "m settings", "n new runner", "w approval", "h add computer", "s start", "x stop", "tab next log"):
         assert key in wide, (picking, key, wide)
-assert "runners stay on" in footer_text(160, None)
-assert "c cancel" in footer_text(160, "run") and "r run again" in footer_text(160, "run")        # what the chosen run can do
-assert "enter start" in footer_text(160, "request") and "d decline" in footer_text(160, "request")
+assert "runners stay on" in footer_text(190, None)
+assert "c cancel" in footer_text(190, "run") and "r run again" in footer_text(190, "run")        # what the chosen run can do
+assert "enter start" in footer_text(190, "request") and "d decline" in footer_text(190, "request")
 mid = footer_text(110, "run")                                                                  # a normal window: nothing needed is gone
-for key in ("↑↓ choose", "c cancel", "r run again", "esc back", "q quit", "n new runner", "w approval"):
+for key in ("↑↓ choose", "c cancel", "r run again", "esc back", "q quit", "m settings", "n new runner"):
     assert key in mid, (key, mid)
 for picking in ("run", "request", None):
     for width in (60, 45):                                                                     # a short one keeps move, back and quit

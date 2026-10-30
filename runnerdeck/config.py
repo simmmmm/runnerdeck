@@ -143,13 +143,13 @@ def load(path=None):
     return configure(config)
 
 
-def set_approval(path, workflows, label):
-    """The [approval] section of a config file set, or taken out when there are no
-    workflows. The rest of the file stays as it is, comments too. The old file is kept
-    as .bak, and put back if the new one is not a good config."""
+def set_section(path, header, body):
+    """The section `header` (like "[approval]") of a config file set to the lines of `body`, or
+    taken out when `body` is empty. The rest of the file stays as it is, comments too. The old file
+    is kept as .bak, and put back if the new one is not a good config."""
     with open(path) as file:
         lines = file.read().split("\n")
-    start = next((i for i, line in enumerate(lines) if line.strip().lower() == "[approval]"), None)
+    start = next((i for i, line in enumerate(lines) if line.strip().lower() == header.lower()), None)
     if start is None:
         start = end = len(lines)
     else:
@@ -159,9 +159,9 @@ def set_approval(path, workflows, label):
         while end - 1 > start and (not lines[end - 1].strip() or lines[end - 1].lstrip().startswith("#")):
             end -= 1
         # The comment lines right above the header go with the section when it is taken out.
-        while not workflows and start > 0 and lines[start - 1].lstrip().startswith("#"):
+        while not body and start > 0 and lines[start - 1].lstrip().startswith("#"):
             start -= 1
-    new = ["[approval]", f"workflows = {', '.join(workflows)}", f"label = {label}"] if workflows else []
+    new = [header, *body] if body else []
     if new and start == end:
         # A section that was not there: after the last setting, before any comments at the foot.
         last = max((i for i, line in enumerate(lines) if line.strip() and not line.lstrip().startswith("#")), default=-1)
@@ -179,3 +179,13 @@ def set_approval(path, workflows, label):
     except (ConfigError, OSError):
         shutil.copyfile(path + ".bak", path)
         raise
+
+
+def set_approval(path, workflows, label):
+    """The [approval] section set, or taken out when there are no workflows."""
+    set_section(path, "[approval]", [f"workflows = {', '.join(workflows)}", f"label = {label}"] if workflows else [])
+
+
+def set_host(path, name, ssh, service=""):
+    """The section [host name]: a computer to read over ssh, added, or changed if it is there."""
+    set_section(path, f"[host {name}]", [f"ssh = {ssh}"] + ([f"service = {service}"] if service else []))

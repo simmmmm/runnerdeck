@@ -8,13 +8,13 @@ import threading
 import zipfile
 from .util import read
 from .system import WINDOWS
-from .config import ConfigError, EXAMPLE, NoConfig, default_path, load
+from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, set_section
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
 from .github import Queue, act_on_run, approve, close, row_of
-from .machines import build_machines
+from .machines import Pc, build_machines
 from .terminal import ConsoleTerminal, CursesTerminal, ENTER, Grid, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
 from .boxes import paint
-from .setup import Wizard, run as run_setup
+from .setup import Wizard, menu, run as run_setup
 
 
 def show(window, cfg, runners, queue, machine, pcs=()):
@@ -61,6 +61,90 @@ def show(window, cfg, runners, queue, machine, pcs=()):
         if letter == "c":
             return ask("Cancel", f"Cancel {what}?", "Cancel it", "Let it run", lambda: queue.carry_out(row, "cancelling", lambda: act_on_run(item, "c")))
         return ask("Run again", f"Run {what} again?", "Run it", "Leave it", lambda: queue.carry_out(row, "starting again", lambda: act_on_run(item, "r")))
+
+    def approval():
+        """The workflows that wait for a yes, chosen again, for the config that is there."""
+        wizard = Wizard.for_approval(cfg)
+        run_setup(window, wizard)
+        if wizard.saved:
+            try:
+                fresh = load()
+                cfg.approval, cfg.asked = fresh.approval, fresh.asked
+                queue.said = "Saved. Waiting for your yes: " + (", ".join(cfg.approval["workflows"]) or "no workflow")
+            except (ConfigError, ValueError) as err:
+                queue.said = f"The file is saved, but cannot be read: {err}"
+
+    def computer():
+        """A computer to read over ssh: asked, tried, added to the config and to the screen at once."""
+        wizard = Wizard.for_host(cfg)
+        run_setup(window, wizard)
+        if wizard.saved:
+            name, host, service = (wizard.answers[key] for key in ("host_name", "ssh", "service"))
+            pcs[:] = [pc for pc in pcs if pc.name != name] + [Pc(name, host, service)]
+            try:
+                cfg.hosts = load().hosts
+            except (ConfigError, ValueError):
+                pass
+            queue.said = f"{name} is added. It shows as soon as it answers."
+
+    def repositories():
+        """The repositories that are watched: added to, or taken from."""
+        wizard = Wizard.for_repos(cfg)
+        run_setup(window, wizard)
+        if wizard.saved:
+            try:
+                cfg.repos = load().repos
+                queue.runs = None
+                threading.Thread(target=queue.fetch, daemon=True).start()
+                queue.said = "Saved. Watching: " + ", ".join(cfg.repos)
+            except (ConfigError, ValueError) as err:
+                queue.said = f"The file is saved, but cannot be read: {err}"
+
+    def remove_computer():
+        nonlocal dialog, note
+        names = [pc.name for pc in pcs if getattr(pc, "host", None)]
+        if not names:
+            note = "There is no other computer in the config"
+            return
+        chosen = menu(window, "Remove which computer?", names, intro=("It leaves the config file. The computer itself is not touched.",))
+        if chosen is None:
+            return
+        name = names[chosen]
+
+        def remove():
+            try:
+                set_section(default_path(), f"[host {name}]", [])
+                pcs[:] = [pc for pc in pcs if pc.name != name]
+                cfg.hosts = load().hosts
+                queue.said = f"{name} is removed"
+            except (ConfigError, OSError, ValueError) as err:
+                queue.said = f"Not removed: {err}"
+        dialog = ask("Remove", f"Remove {name} from the config?", "Remove", "Keep", remove)
+
+    def runner_dialog():
+        nonlocal dialog, note
+        def make(token):
+            def work():
+                queue.said = add_runner(cfg, runners, token)[0]
+            threading.Thread(target=work, daemon=True).start()
+            queue.said = "Setting up a new runner…"
+        if cfg.local:
+            dialog = {"title": "New runner", "words": f"Registration token for {cfg.local['repo']}", "field": "", "then": make}
+        else:
+            note = "Runners here need a [local] section in the config"
+
+    def config_file():
+        nonlocal note
+        note = f"Config file: {default_path()}  (read it with cat, or find it in your file manager)"
+
+    def settings():
+        """Everything that can be changed, in one list. Each is also on a key of its own."""
+        items = (("Add a runner on this machine  (n)", runner_dialog), ("Repositories: add or take out", repositories),
+                 ("Workflows that wait for your yes  (w)", approval), ("Add a computer to watch  (h)", computer),
+                 ("Remove a computer", remove_computer), ("Where is the config file?", config_file))
+        chosen = menu(window, "Settings", [label for label, _ in items])
+        if chosen is not None:
+            items[chosen][1]()
 
     while True:
         if queue.said:
@@ -150,26 +234,13 @@ def show(window, cfg, runners, queue, machine, pcs=()):
             window.back()
             note = ""
         elif key == ord("w"):
-            # The workflows that wait for a yes, chosen again, for the config that is there.
-            wizard = Wizard.for_approval(cfg)
-            run_setup(window, wizard)
-            if wizard.saved:
-                try:
-                    fresh = load()
-                    cfg.approval, cfg.asked = fresh.approval, fresh.asked
-                    queue.said = "Saved. Waiting for your yes: " + (", ".join(cfg.approval["workflows"]) or "no workflow")
-                except (ConfigError, ValueError) as err:
-                    queue.said = f"The file is saved, but cannot be read: {err}"
+            approval()
+        elif key == ord("h"):
+            computer()
         elif key == ord("n"):
-            def make(token):
-                def work():
-                    queue.said = add_runner(cfg, runners, token)[0]
-                threading.Thread(target=work, daemon=True).start()
-                queue.said = "Setting up a new runner…"
-            if cfg.local:
-                dialog = {"title": "New runner", "words": f"Registration token for {cfg.local['repo']}", "field": "", "then": make}
-            else:
-                note = "Runners here need a [local] section in the config"
+            runner_dialog()
+        elif key == ord("m"):
+            settings()
 
 
 def build(target):

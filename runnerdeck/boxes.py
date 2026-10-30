@@ -265,7 +265,7 @@ def footer(canvas, y, width, note, picking=None):
     # ones of what is chosen come first. Where the width is short, the first three here stay
     # (move, back, quit) and the others go from the right.
     leave = "quit, runners stay on" if width >= 140 else "quit"
-    general = (("q", leave), ("n", "new runner"), ("w", "approval"), ("s", "start"), ("x", "stop"), ("tab", "next log"))
+    general = (("q", leave), ("m", "settings"), ("n", "new runner"), ("w", "approval"), ("h", "add computer"), ("s", "start"), ("x", "stop"), ("tab", "next log"))
     keys = {"run": (("↑↓", "choose"), ("c", "cancel"), ("r", "run again"), ("o", "open"), ("esc", "back")) + general,
             "request": (("↑↓", "choose"), ("enter", "start"), ("d", "decline"), ("esc", "back")) + general,
             "dialog": (("y", "yes"), ("n", "no"), ("← →", "choose"), ("enter", "answer")),

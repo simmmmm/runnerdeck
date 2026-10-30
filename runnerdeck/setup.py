@@ -10,7 +10,7 @@ import sys
 import textwrap
 import threading
 import time
-from .config import ConfigError, HOST, REFERENCE, SLUG, WORD, configure, default_path, set_approval
+from .config import ConfigError, HOST, REFERENCE, SLUG, WORD, configure, default_path, set_approval, set_host, set_section
 from .runners import Runner, TOKEN, find_runners, gh_token, plan_of, set_up
 from .terminal import K_BACKSPACE, K_DOWN, K_RESIZE, K_UP, Screen, colours, frame
 
@@ -26,6 +26,7 @@ STEPS = {
     "other": ("yesno", "Another machine"),
     "ssh": ("text", "SSH address"),
     "service": ("text", "Runner service"),
+    "hostname": ("text", "Name"),
     "approval": ("yesno", "Approval"),
     "workflows": ("text", "Workflows"),
     "label": ("text", "Label"),
@@ -178,6 +179,17 @@ class Wizard:
         return cls(checks, path=path, start="workflows", mode="approval", typed=typed, threaded=threaded,
                    seed={"repos": cfg.repos, "workflows": list(cfg.approval["workflows"])})
 
+    @classmethod
+    def for_repos(cls, cfg, checks=None, path=None, threaded=True):
+        """Only the repositories: the ones that are watched, to add to or take from."""
+        return cls(checks, path=path, start="repos", mode="repos", threaded=threaded, seed={"repos": list(cfg.repos)})
+
+    @classmethod
+    def for_host(cls, cfg, checks=None, path=None, threaded=True):
+        """Only a computer to read over ssh: its address (tried at once), its runner service and a
+        name, added to the config that is there."""
+        return cls(checks, path=path, start="ssh", mode="host", threaded=threaded, seed={"repos": cfg.repos, "other": True})
+
     # ---- moving between steps
     def enter(self):
         self.field = self.typed.get(self.step) or self.default(self.step)
@@ -209,7 +221,12 @@ class Wizard:
     def save(self):
         a = self.answers
         try:
-            set_approval(self.path, a["workflows"], a["label"])
+            if self.mode == "repos":
+                set_section(self.path, "[deck]", ["repos = " + ", ".join(a["repos"])])
+            elif self.mode == "host":
+                set_host(self.path, a["host_name"], a["ssh"], a["service"])
+            else:
+                set_approval(self.path, a["workflows"], a["label"])
             self.saved = True
         except (ConfigError, OSError) as err:
             self.note, self.bad = f"Not saved: {err}", True
@@ -241,6 +258,10 @@ class Wizard:
                 self.note, self.bad = f"Something went wrong: {got[2]}", True
             else:
                 got[1](got[2])
+
+    def store(self, step, value):
+        """An answer, under its name in the answers (the name of a computer is kept as host_name)."""
+        self.answers["host_name" if step == "hostname" else step] = value
 
     def remember(self):
         """What was typed stays when the step is left and come back to. What was only
@@ -346,7 +367,7 @@ class Wizard:
         if self.kept:
             # A warning was said about this answer and it is the same: keep it, do not check again.
             self.remember()
-            self.answers[step] = self.kept_parsed
+            self.store(step, self.kept_parsed)
             return self.go(self.after())
         words = self.SLOW.get(step)
         if words:
@@ -363,7 +384,7 @@ class Wizard:
             self.note, self.bad, self.kept, self.kept_parsed = warning, False, True, parsed
             return
         self.remember()
-        self.answers[self.step] = parsed
+        self.store(self.step, parsed)
         self.go(self.after())
 
     def advance(self):
@@ -381,9 +402,9 @@ class Wizard:
         # The repository of the row that can be managed first: new runners go there.
         first = [self.plan["repo"]] if self.plan and self.plan["repo"] else []
         repos = list(dict.fromkeys(first + [item["repo"] for item in self.found if item["repo"]]))
-        return {"repos": ", ".join(repos), "count": str(self.plan["count"]) if self.plan else "0", "name": a["name"], "dir": a["dir"], "local_repo": self.plan["repo"] if self.plan and self.plan["repo"] in a["repos"] else (a["repos"] or [""])[0],
+        return {"repos": ", ".join(a["repos"]) if self.mode == "repos" else ", ".join(repos), "count": str(self.plan["count"]) if self.plan else "0", "name": a["name"], "dir": a["dir"], "local_repo": self.plan["repo"] if self.plan and self.plan["repo"] in a["repos"] else (a["repos"] or [""])[0],
                 "token": "", "other": "n", "ssh": "", "service": "", "approval": "n", "workflows": ", ".join(a["workflows"]),
-                "label": self.default_label(),
+                "label": self.default_label(), "hostname": a["host_name"],
                 "command": "y"}.get(step, "")
 
     def missing_runners(self):
@@ -397,8 +418,8 @@ class Wizard:
         a, step = self.answers, self.step
         # A token is for registering a runner: asked only when one is missing.
         registering = "token" if self.missing_runners() else "other"
-        return {"repos": "count", "name": "dir", "local_repo": registering, "token": "other", "ssh": "service",
-                "service": "approval", "command": "review",
+        return {"repos": "save" if self.mode == "repos" else "count", "name": "dir", "local_repo": registering, "token": "other", "ssh": "service",
+                "service": "hostname" if self.mode == "host" else "approval", "hostname": "save", "command": "review",
                 "workflows": "label" if self.mode == "setup" or a["workflows"] else "save",
                 "label": "command" if self.mode == "setup" else "save",
                 "count": "name" if a["count"] else "other",
@@ -439,7 +460,10 @@ class Wizard:
         if step == "ssh":
             if not HOST.match(value):
                 return "Write it like user@host.", None, None
-            a["host_name"] = re.sub(r"[^A-Za-z0-9_-]", "", value.split("@")[-1].split(".")[0]) or "pc"
+            where = value.split("@")[-1]
+            # A name from the address, unless the address is only numbers (then it is not a name).
+            a["host_name"] = ("pc" if re.fullmatch(r"[0-9.]+", where) or ":" in where
+                              else re.sub(r"[^A-Za-z0-9_-]", "", where.split(".")[0])) or "pc"
             tried = self.checks.ssh(value)
             connected, why = tried if isinstance(tried, tuple) else (tried, "It did not connect.")
             if not connected:
@@ -451,6 +475,8 @@ class Wizard:
             if (not names and self.mode == "setup") or not all(WORD.match(w) for w in names):
                 return "Write the workflow names, with a comma between them.", None, None
             return None, None, names
+        if step == "hostname" and (not WORD.match(value) or " " in value):
+            return "Use letters, digits, dots, dashes and underscores. No spaces.", None, None
         if step == "label" and not WORD.match(value):
             return "Use letters, digits, dots, dashes and underscores.", None, None
         return None, None, value
@@ -530,7 +556,9 @@ class Wizard:
                 lines += ["", "You can go on, but the program cannot show the runs until gh works."]
             return lines
         return {
-            "repos": ["Which repository do you want to watch?", "Write owner/name. Use a comma for more than one."],
+            "repos": (["Which repositories do you watch?", "Add a name or take one out. Use a comma between them."]
+                      if self.mode == "repos" else
+                      ["Which repository do you want to watch?", "Write owner/name. Use a comma for more than one."]),
             "count": ["How many runners do you want on this machine?",
                       ("I found " + str(self.plan["count"]) + " set up here. Keep the number to use them."
                        if self.plan else "0 means none: you only watch.")],
@@ -561,8 +589,14 @@ class Wizard:
                      + [
                       "The title of the issue is the workflow name, a branch and a commit. For example: "
                       + (a["workflows"] or ["Deploy"])[0] + ": main a0d3a70"],
-            "save": (["Saved.", "", "These workflows wait for your yes: " + (", ".join(a["workflows"]) or "none"),
-                     f"The old file is kept as {os.path.basename(self.path)}.bak."] if self.saved else ["The file was not changed."]),
+            "hostname": ["What do you call this computer?",
+                         "A short name, like pc. It is the name of its section in the config file."],
+            "save": (["Saved.", ""]
+                     + (["Added: " + a["host_name"] + " (" + a["ssh"] + "). It shows on the screen as soon as it answers."]
+                        if self.mode == "host" else
+                        ["Watching: " + ", ".join(a["repos"])] if self.mode == "repos" else
+                        ["These workflows wait for your yes: " + (", ".join(a["workflows"]) or "none")])
+                     + [f"The old file is kept as {os.path.basename(self.path)}.bak."] if self.saved else ["The file was not changed."]),
             "command": ["Do you want a `runnerdeck` command in your terminal?",
                         "The program copies itself to your home folder (runnerdeck.pyz) and adds one line to your shell file."],
             "review": ["This is the config file:", ""] + config_text(a).split("\n# ---- ")[0].splitlines()
@@ -654,3 +688,30 @@ def run(terminal, wizard):
         elif key != -1:
             wizard.feed(key)
     return None if wizard.cancelled else wizard.cfg
+
+
+def menu(terminal, title, items, intro=()):
+    """A list to choose one from, on the screen: the arrow keys and Enter, or the number of an item.
+    The index of what was chosen, or None for Esc."""
+    colours()
+    cursor = 0
+    while True:
+        canvas = Screen(terminal)
+        lines = list(intro) + ([""] if intro else [])
+        lines += [("strong" if i == cursor else "plain", f"{'›' if i == cursor else ' '} {i + 1}. {item}") for i, item in enumerate(items)]
+        draw(canvas, {"title": title, "lines": lines, "field": None, "secret": False, "fresh": False, "busy": None,
+                      "hint": "↑ ↓: move · enter: choose · esc: close", "note": "", "bad": False})
+        canvas.flush()
+        key = terminal.key()
+        if key == K_RESIZE:
+            sys.stdout.buffer.write(b"\x1b[2J")
+        elif key == K_UP:
+            cursor = max(0, cursor - 1)
+        elif key == K_DOWN:
+            cursor = min(len(items) - 1, cursor + 1)
+        elif key in (10, 13, 343):
+            return cursor
+        elif key in (27, ord("q")):
+            return None
+        elif ord("1") <= key <= ord("9") and key - ord("1") < len(items):
+            return key - ord("1")

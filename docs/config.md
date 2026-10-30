@@ -8,6 +8,10 @@ You do not have to write the file yourself. The program asks the questions the f
 
 The program checks the file when it reads it. A wrong value stops the start, with a message.
 
+## Change it from the screen
+
+Press `m` for the settings. In one list you can add a runner, add or take out a repository, choose the workflows that wait for your yes, add or remove a computer, and see where the file is. Each of these changes only its own part of the file. The rest stays as it is, comments too. The old file is kept as `config.ini.bak`, and a change that makes the file wrong is not kept. The keys `n`, `w` and `h` go to the first, third and fourth item directly.
+
 ## Sections
 
 | Section | Use |
