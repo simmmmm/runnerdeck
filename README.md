@@ -20,16 +20,18 @@
 ## What it does
 
 - It shows each runner on your machine, what it does, and how far its job is.
-- It shows CPU, GPU, memory, and temperature of your machines. It reads other machines over SSH.
+- It shows CPU, GPU, memory, and temperature of your machines. It reads a second computer over SSH.
 - It shows the last workflow runs of your repositories. You can cancel, repeat, or open a run.
+- The first time, it asks a few questions on the screen and writes the config file for you. It finds runners that are set up already.
 - You can add a new runner. You only paste the token.
-- You can keep a workflow behind your approval.
+- You can keep a workflow behind your approval, and change which ones later.
 
 ## What you need
 
 - Python 3.9 or newer. You do not need other packages.
 - The [GitHub CLI](https://cli.github.com), logged in (`gh auth login`).
 - macOS, Linux, or Windows.
+- An SSH key for a second computer. It must run Linux for now. The program never asks for a password.
 
 ## Start
 
@@ -80,6 +82,7 @@ service = actions-runner.service
 
 ## Status
 
-- The program grew from a script that ran on a Mac. This version has only run with recorded data and stand-in tools.
+- A person has run the screen, the setup, the runs and the approval on a Mac.
+- The readings of a Linux PC (the GPU, the temperatures, the runner service) have only run with recorded data and stand-in tools. So has the SSH connection to a second computer.
 - No person has run it on Windows. The Windows code is the least tested.
 - The license is [MIT](LICENSE).

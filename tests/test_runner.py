@@ -437,7 +437,7 @@ with tempfile.TemporaryDirectory() as tmp:
         registered("actions-runner", "mac", "o/app")
         registered("actions-runner-2", "mac-2", "o/app", bom=False)
         registered("actions-runner-3", "mac-3", "o/app")
-        registered(".local/share/numa-runner", "pc-runner", "o/lib")
+        registered(".local/share/other-runner", "pc-runner", "o/lib")
         registered("Documents/old/runner", "never", "o/app")                 # macOS asks leave to look: not entered
         os.makedirs(os.path.join(home, "broken"))
         open(os.path.join(home, "broken", ".runner"), "w").write("not json")  # said nothing of, not a crash
