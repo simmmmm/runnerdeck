@@ -8,6 +8,8 @@ workflows = Deploy
 label = deploy-request
 ```
 
+The setup asks `gh` for the workflows of your repositories and lets you choose from the list. Move with the arrow keys, choose with the space bar, and press Enter. If `gh` gives no list, you write the names.
+
 ## How it works
 
 1. A person or a tool opens an issue. The issue has the label from the config file.

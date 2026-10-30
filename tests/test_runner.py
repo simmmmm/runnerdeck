@@ -207,8 +207,11 @@ from runner import setup as setupmod
 
 
 class Checks:
-    def __init__(self, gh=(True, True), seen=None, ssh=True):
-        self.gh_state, self.seen, self.ssh_ok = gh, seen or {}, ssh
+    def __init__(self, gh=(True, True), seen=None, ssh=True, workflows=None):
+        self.gh_state, self.seen, self.ssh_ok, self.names = gh, seen or {}, ssh, workflows or {}
+
+    def workflows(self, repo):
+        return self.names.get(repo, [])
 
     def gh(self):
         return self.gh_state
@@ -290,6 +293,41 @@ with tempfile.TemporaryDirectory() as tmp:
     shown = w.field
     w.feed(127)
     assert w.field == shown[:-1]
+
+    # the workflows are listed, and chosen with the arrow keys and the space bar
+    names = ["CI", "Build", "TestFlight", "Screenshots", "Feedback", "Bad & Name", "Nightly", "Docs", "Lint", "Smoke",
+             "Release", "Deploy"]
+    w = wizard_for(workflows={"a/b": names[:8], "c/d": names[6:]})
+    answer(w); answer(w, "a/b, c/d"); answer(w, "0"); w.feed(ord("n")); w.feed(ord("y"))
+    assert w.step == "workflows" and w.kind() == "pick"
+    assert w.options == ["CI", "Build", "TestFlight", "Screenshots", "Feedback", "Nightly", "Docs", "Lint", "Smoke", "Release", "Deploy"]
+    assert w.skipped == 1                                                    # "Bad & Name": the program cannot use it
+    shown = "\n".join(str(row) for row in w.text())
+    assert "[ ] CI" in shown and "11 workflows" in shown and "cannot use" in shown
+    answer(w)                                                                # nothing chosen yet
+    assert w.step == "workflows" and w.bad
+    w.feed(terminal.K_DOWN); w.feed(terminal.K_DOWN); w.feed(32)             # TestFlight
+    w.feed(terminal.K_UP); w.feed(terminal.K_UP); w.feed(terminal.K_UP)      # stays at the top
+    assert w.cursor == 0
+    w.feed(32)                                                               # CI
+    w.feed(32)                                                               # CI off again
+    for _ in range(20):
+        w.feed(terminal.K_DOWN)
+    assert w.cursor == 10                                                    # stops at the last
+    w.feed(32)                                                               # Deploy
+    answer(w)
+    assert w.step == "label" and w.answers["workflows"] == ["TestFlight", "Deploy"] and w.field == "testflight-request"
+    w.feed(27)                                                               # back: what was chosen is still chosen
+    assert w.step == "workflows" and w.picked == {2, 10}
+    w.feed(27); w.feed(27)
+    assert w.step == "other"
+
+    # no list from gh: the names are typed, as before
+    w = wizard_for()
+    answer(w); answer(w, "a/b"); answer(w, "0"); w.feed(ord("n")); w.feed(ord("y"))
+    assert w.step == "workflows" and w.kind() == "text" and "did not list any" in str(w.text())
+    answer(w, "TestFlight, Build")
+    assert w.step == "label" and w.answers["workflows"] == ["TestFlight", "Build"]
 
     # runners that are set up already are found, and offered as the answers
     with tempfile.TemporaryDirectory() as home:

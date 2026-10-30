@@ -1,5 +1,6 @@
 """First start: the questions that make the config file, one at a time, on the terminal screen."""
 import configparser
+import json
 import os
 import platform
 import re
@@ -10,7 +11,7 @@ import textwrap
 import threading
 from .config import ConfigError, HOST, SLUG, WORD, configure, default_path
 from .runners import Runner, TOKEN, find_runners, gh_token, plan_of, set_up
-from .terminal import K_BACKSPACE, K_RESIZE, Screen, colours, frame
+from .terminal import K_BACKSPACE, K_DOWN, K_RESIZE, K_UP, Screen, colours, frame
 
 # Each step: its kind (info, text or yesno) and the title on the right of its frame.
 STEPS = {
@@ -49,6 +50,17 @@ class Checks:
             return None
         got = subprocess.run(["gh", "api", f"repos/{repo}", "--jq", ".full_name"], capture_output=True, text=True, timeout=20)
         return got.returncode == 0
+
+    def workflows(self, repo):
+        """The names of the workflows of a repository, as GitHub lists them; none if gh cannot say."""
+        if not shutil.which("gh"):
+            return []
+        got = subprocess.run(["gh", "workflow", "list", "--repo", repo, "--json", "name", "--limit", "100"],
+                             capture_output=True, text=True, timeout=20)
+        try:
+            return [item["name"] for item in json.loads(got.stdout)] if got.returncode == 0 else []
+        except (ValueError, KeyError, TypeError):
+            return []
 
     def ssh(self, host):
         got = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "true"],
@@ -105,6 +117,8 @@ class Wizard:
         self.progress = []
         self.gh = (False, False)
         self.found, self.plan, self.left = [], None, []
+        # The workflows to choose from, which of them, and how many names the program cannot use.
+        self.options, self.cursor, self.picked, self.skipped = [], 0, set(), 0
         self.enter()
 
     # ---- moving between steps
@@ -121,9 +135,26 @@ class Wizard:
             if self.plan:
                 self.answers["name"], self.answers["dir"] = self.plan["name"], self.plan["dir"]
             self.field = self.default("welcome")
+        elif self.step == "workflows":
+            self.options, self.skipped = self.lookup()
+            self.cursor = 0
+            chosen = self.answers["workflows"]
+            self.picked = {i for i, name in enumerate(self.options) if name in chosen}
         elif self.step == "work":
             self.working = True
             threading.Thread(target=self.work, daemon=True).start()
+
+    def lookup(self):
+        """The workflows of the repositories, those whose names the program can use, and how many it cannot."""
+        names = []
+        for repo in self.answers["repos"]:
+            names += [name for name in self.checks.workflows(repo) if name not in names]
+        usable = [name for name in names if WORD.match(name)]
+        return usable, len(names) - len(usable)
+
+    def kind(self):
+        """Choosing from a list, if gh gave one; else typing the names."""
+        return "pick" if self.step == "workflows" and self.options else STEPS[self.step][0]
 
     def go(self, step):
         self.history.append(self.step)
@@ -144,10 +175,23 @@ class Wizard:
     def feed(self, key):
         if self.finished or key == K_RESIZE:
             return
-        kind = STEPS[self.step][0]
+        kind = self.kind()
         if key == 27:
             return self.back()
-        if kind == "info":
+        if kind == "pick":
+            if key == K_UP:
+                self.cursor = max(0, self.cursor - 1)
+            elif key == K_DOWN:
+                self.cursor = min(len(self.options) - 1, self.cursor + 1)
+            elif key == 32:
+                self.picked ^= {self.cursor}
+            elif key in (10, 13, 343):
+                if not self.picked:
+                    self.note, self.bad = "Choose at least one with the space bar. Or press Esc and answer n.", True
+                else:
+                    self.answers["workflows"] = [self.options[i] for i in sorted(self.picked)]
+                    self.go(self.after())
+        elif kind == "info":
             if key in (10, 13, 343) and not self.working:
                 self.advance()
         elif kind == "yesno":
@@ -344,8 +388,9 @@ class Wizard:
             "approval": ["Do you want to keep a workflow behind your approval?",
                          "Some workflows should start only when you say yes. A deploy or a TestFlight upload is an example.",
                          "If you have none, answer n. You can add one later."],
-            "workflows": ["Which workflow must wait for your yes?",
-                          "Write its name as GitHub shows it in the Actions tab. For example: TestFlight.",
+            "workflows": self.pick_text() if self.options else [
+                          "Which workflow must wait for your yes?",
+                          "gh did not list any, so write the name as GitHub shows it in the Actions tab. For example: TestFlight.",
                           "Use a comma for more than one."],
             "label": ["Which label do the requests have?",
                       "To ask for a start, a person or a tool opens an issue with this label.",
@@ -360,10 +405,25 @@ class Wizard:
                     + ([("bad", self.problem)] if self.problem else []),
         }[step]
 
+    def pick_text(self):
+        """The list: ten at a time around the cursor, [x] for what is chosen."""
+        rows = ["Which workflows must wait for your yes?",
+                "Move with the arrow keys. Press the space bar to choose. Press Enter when you are done.", ""]
+        start = max(0, min(self.cursor - 4, len(self.options) - 10))
+        for i in range(start, min(len(self.options), start + 10)):
+            mark = "x" if i in self.picked else " "
+            rows.append(("strong" if i == self.cursor else "plain", f"{'›' if i == self.cursor else ' '} [{mark}] {self.options[i]}"))
+        if len(self.options) > 10:
+            rows.append(("dim", f"   {len(self.options)} workflows. The arrow keys show more."))
+        if self.skipped:
+            rows.append(("warm", f"   {self.skipped} more have names with characters the program cannot use."))
+        return rows
+
     def view(self):
-        kind, title = STEPS[self.step]
+        kind, title = self.kind(), STEPS[self.step][1]
         hint = {"info": "enter: next · esc: back", "text": "enter: next · esc: back",
-                "yesno": f"y: yes · n: no · enter: {'yes' if self.default(self.step) == 'y' else 'no'} · esc: back"}[kind]
+                "yesno": f"y: yes · n: no · enter: {'yes' if self.default(self.step) == 'y' else 'no'} · esc: back",
+                "pick": "↑ ↓: move · space: choose · enter: next · esc: back"}[kind]
         if self.step == "work" and self.working:
             hint = "wait…"
         if self.step == "done":
