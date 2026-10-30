@@ -323,6 +323,15 @@ with tempfile.TemporaryDirectory() as tmp:
     w.feed(27); w.feed(27)
     assert w.step == "other"
 
+    # the example in the question names the workflow that was chosen
+    w = wizard_for(workflows={"a/b": ["Build", "TestFlight"]})
+    answer(w); answer(w, "a/b"); answer(w, "0"); w.feed(ord("n")); w.feed(ord("y"))
+    w.feed(terminal.K_DOWN); w.feed(32); answer(w)
+    assert w.step == "label" and w.field == "testflight-request" and "TestFlight: main a0d3a70" in str(w.text())
+    w.feed(27); w.feed(terminal.K_UP); w.feed(32); w.feed(terminal.K_DOWN); w.feed(32)   # Build on, TestFlight off
+    answer(w)
+    assert w.field == "build-request" and "Build: main a0d3a70" in str(w.text())
+
     # no list from gh: the names are typed, as before
     w = wizard_for()
     answer(w); answer(w, "a/b"); answer(w, "0"); w.feed(ord("n")); w.feed(ord("y"))

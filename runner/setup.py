@@ -144,6 +144,14 @@ class Wizard:
             self.working = True
             threading.Thread(target=self.work, daemon=True).start()
 
+    def remember(self):
+        """What was typed stays when the step is left and come back to. What was only
+        offered does not: it is offered again, from what is known by then."""
+        if self.fresh:
+            self.typed.pop(self.step, None)
+        else:
+            self.typed[self.step] = self.field
+
     def lookup(self):
         """The workflows of the repositories, those whose names the program can use, and how many it cannot."""
         names = []
@@ -167,7 +175,7 @@ class Wizard:
         if not self.history:
             self.finished = self.cancelled = True
             return
-        self.typed[self.step] = self.field
+        self.remember()
         self.step = self.history.pop()
         self.enter()
 
@@ -216,7 +224,7 @@ class Wizard:
         if warning and not self.kept:
             self.note, self.bad, self.kept = warning, False, True
             return
-        self.typed[self.step] = self.field
+        self.remember()
         self.answers[self.step] = parsed
         self.go(self.after())
 
@@ -403,7 +411,8 @@ class Wizard:
                           "Use a comma for more than one."],
             "label": ["Which label do the requests have?",
                       "To ask for a start, a person or a tool opens an issue with this label.",
-                      "The title of the issue is the workflow name, a branch and a commit. For example: TestFlight: main a0d3a70"],
+                      "The title of the issue is the workflow name, a branch and a commit. For example: "
+                      + (a["workflows"] or ["Deploy"])[0] + ": main a0d3a70"],
             "command": ["Do you want a `runner` command in your terminal?",
                         "The program copies itself to your home folder (runner.pyz) and adds one line to your shell file."],
             "review": ["This is the config file:", ""] + config_text(a).splitlines() + ["", f"Enter writes it to {self.path}"]
