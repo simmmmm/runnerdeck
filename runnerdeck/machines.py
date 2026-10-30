@@ -289,6 +289,8 @@ class Pc:
     def __init__(self, name, host=None, service="", once=False):
         self.name, self.host, self.service = name, host, service
         self.now, self.at = {}, None
+        # True once it has been asked and did not answer: the screen leaves its box out and says so in the head.
+        self.failed = False
         self.cpu, self.gpu = deque(maxlen=200), deque(maxlen=200)
         if once:
             self.sample()
@@ -303,12 +305,12 @@ class Pc:
         if now is None:
             # Kept as it was, but called stale: a machine that is off must
             # not look busy.
-            self.at = None
+            self.at, self.failed = None, True
             return
         for history, value in ((self.cpu, now["cpu"]), (self.gpu, now["gpu"])):
             if value is not None:
                 history.append(value)
-        self.now, self.at = now, time.time()
+        self.now, self.at, self.failed = now, time.time(), False
 
     def reachable(self):
         return self.at is not None

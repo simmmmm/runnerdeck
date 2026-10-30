@@ -181,9 +181,19 @@ def runners_box(canvas, y, width, runners, queue):
     return y + height
 
 
+def repo_labels(repos):
+    """The short name of each repository, the part after the owner; the whole
+    name where two have the same."""
+    shorts = [repo.split("/")[-1] for repo in repos]
+    return {repo: short if shorts.count(short) == 1 else repo for repo, short in zip(repos, shorts)}
+
+
 def github_box(canvas, y, width, runs, repos, picked=None, working=None):
     working = working or {}
-    many = len({run.get("repo") for run in runs}) > 1
+    # Every run says which repository it is of as soon as there are two, not only when the
+    # runs shown happen to be of both.
+    many = len(repos) > 1
+    labels = repo_labels(repos)
     frame(canvas, y, 0, 2 + len(runs), width, "github", ", ".join(repos) if len(", ".join(repos)) < width - 16 else f"{len(repos)} repositories")
     for line, run in enumerate(runs, start=y + 1):
         doing = working.get(run.get("databaseId"))
@@ -193,7 +203,7 @@ def github_box(canvas, y, width, runs, repos, picked=None, working=None):
             canvas.put(line, 17, run.get("headBranch", "")[:24], "picked")
             canvas.put(line, 42, run.get("headSha", "")[:7], "picked")
             if many:
-                canvas.put(line, 50, run.get("repo", "").split("/")[-1][:16], "picked")
+                canvas.put(line, 50, labels.get(run.get("repo"), run.get("repo", ""))[:20], "picked")
             word = f"{doing}…" if doing else run.get("conclusion") or (run.get("status") or "").replace("_", " ")
             right(canvas, line, width, f"{word} · {ago(moment(run.get('createdAt', ''), STAMP))}", "picked")
             continue
@@ -206,14 +216,14 @@ def github_box(canvas, y, width, runs, repos, picked=None, working=None):
         canvas.put(line, 17, run.get("headBranch", "")[:24], "dim")
         canvas.put(line, 42, run.get("headSha", "")[:7], "dim")
         if many:
-            canvas.put(line, 50, run.get("repo", "").split("/")[-1][:16], "dim")
+            canvas.put(line, 50, labels.get(run.get("repo"), run.get("repo", ""))[:20], "dim")
         word = f"{doing}…" if doing else conclusion if done else (run.get("status") or "").replace("_", " ")
         when = ago(moment(run.get("createdAt", ""), STAMP))
         right(canvas, line, width, f"{word} · {when}", "warm" if doing else style if style != "dim" else "label")
     return y + 2 + len(runs)
 
 
-def requests_box(canvas, y, width, requests, picked=None, working=None):
+def requests_box(canvas, y, width, requests, picked=None, working=None, labels=None):
     working = working or {}
     frame(canvas, y, 0, 2 + len(requests), width, "waiting for you", "a: start · d: decline")
     for line, request in enumerate(requests, start=y + 1):
@@ -227,7 +237,12 @@ def requests_box(canvas, y, width, requests, picked=None, working=None):
         canvas.put(line, 17, request["branch"][:24], "picked" if chosen else "dim")
         canvas.put(line, 42, request["sha"][:7], "picked" if chosen else "dim")
         words = f"{doing}…" if doing else request["note"]
-        canvas.put(line, 50, words[:max(0, width - 52)], "picked" if chosen else "warm" if doing else "label")
+        at = 50
+        if labels:
+            name = labels.get(request["repo"], request["repo"])[:20]
+            canvas.put(line, at, name, "picked" if chosen else "dim")
+            at += len(name) + 2
+        canvas.put(line, at, words[:max(0, width - at - 2)], "picked" if chosen else "warm" if doing else "label")
     return y + 2 + len(requests)
 
 
@@ -246,13 +261,28 @@ def footer(canvas, y, width, note, picking=None):
     if note:
         canvas.put(y, 1, note[:width - 2], "warm")
         return
-    x = 1
-    keys = {"run": (("↑↓", "choose"), ("c", "cancel"), ("r", "run again"), ("o", "open"), ("esc", "back")),
-            "request": (("↑↓", "choose"), ("enter", "start"), ("d", "decline"), ("esc", "back")),
+    # The keys of the screen are always there, also while a run or a request is chosen: the
+    # ones of what is chosen come first. Where the width is short, the first three here stay
+    # (move, back, quit) and the others go from the right.
+    leave = "quit, runners stay on" if width >= 140 else "quit"
+    general = (("q", leave), ("n", "new runner"), ("w", "approval"), ("s", "start"), ("x", "stop"), ("tab", "next log"))
+    keys = {"run": (("↑↓", "choose"), ("c", "cancel"), ("r", "run again"), ("o", "open"), ("esc", "back")) + general,
+            "request": (("↑↓", "choose"), ("enter", "start"), ("d", "decline"), ("esc", "back")) + general,
             "dialog": (("y", "yes"), ("n", "no"), ("← →", "choose"), ("enter", "answer")),
             "field": (("enter", "set up"), ("esc", "cancel")),
-            None: (("q", "quit, runners stay on"), ("s", "start"), ("x", "stop"), ("n", "new runner"), ("w", "approval"), ("tab", "next log"), ("↑↓", "runs"))}[picking]
+            None: (("↑↓", "runs"),) + general}[picking]
+    must = {"↑↓", "esc", "q"} if picking in ("run", "request", None) else {key for key, _ in keys}
+    used = sum(len(k) + len(w) + 4 for k, w in keys if k in must)
+    shown = []
     for key, words in keys:
+        cost = len(key) + len(words) + 4
+        if key in must:
+            shown.append((key, words))
+        elif used + cost <= width - 2:
+            used += cost
+            shown.append((key, words))
+    x = 1
+    for key, words in shown:
         canvas.put(y, x, key, "strong")
         canvas.put(y, x + len(key) + 1, words, "label")
         x += len(key) + len(words) + 4
@@ -271,12 +301,18 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
     y = 1
     if machine:
         y = mac_box(canvas, y, width, machine)
+    # A computer that did not answer has no box: a line in the head says which.
     for pc in pcs:
-        y = pc_box(canvas, y, width, pc)
+        if pc.reachable():
+            y = pc_box(canvas, y, width, pc)
+    down = [pc.name for pc in pcs if getattr(pc, "failed", False) and not pc.reachable()]
+    if down:
+        canvas.put(0, 15, "· " + ", ".join(down) + " not answering", "dim")
     if runners:
         y = runners_box(canvas, y, width, runners, queue)
     if queue.requests:
-        y = requests_box(canvas, y, width, queue.requests, picked, queue.working)
+        y = requests_box(canvas, y, width, queue.requests, picked, queue.working,
+                         repo_labels(cfg.repos) if len(cfg.repos) > 1 else None)
     room = height - 1 - y
     if not queue.runs and queue.problem and room >= 3:
         frame(canvas, y, 0, 3, width, "github", "no runs")

@@ -11,7 +11,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from runnerdeck import config as configmod, github, machines, runners, system, terminal
+from runnerdeck import boxes, config as configmod, github, machines, runners, system, terminal
 
 
 def configured(text):
@@ -749,6 +749,71 @@ if not system.WINDOWS:
         assert os.WEXITSTATUS(status) == 0
         assert open(config_file).read() == ("# mine\n[deck]\nrepos = owner/name\n\n[approval]\nworkflows = CI, TestFlight\n"
                                             "label = testflight-request\n"), open(config_file).read()
+
+# --- the footer keeps the keys of the screen while something is chosen; a computer that did not answer has no
+# --- box; with two repositories every run and request says which one it is of
+import types
+
+
+def footer_text(width, picking):
+    grid = terminal.Grid(1, width)
+    boxes.footer(grid, 0, width, "", picking)
+    return grid.text()
+
+
+for picking in ("run", "request", None):
+    wide = footer_text(160, picking)
+    for key in ("q quit", "n new runner", "w approval", "s start", "x stop", "tab next log"):
+        assert key in wide, (picking, key, wide)
+assert "runners stay on" in footer_text(160, None)
+assert "c cancel" in footer_text(160, "run") and "r run again" in footer_text(160, "run")        # what the chosen run can do
+assert "enter start" in footer_text(160, "request") and "d decline" in footer_text(160, "request")
+mid = footer_text(110, "run")                                                                  # a normal window: nothing needed is gone
+for key in ("↑↓ choose", "c cancel", "r run again", "esc back", "q quit", "n new runner", "w approval"):
+    assert key in mid, (key, mid)
+for picking in ("run", "request", None):
+    for width in (60, 45):                                                                     # a short one keeps move, back and quit
+        small = footer_text(width, picking)
+        assert "↑↓" in small and "q quit" in small and len(small) <= width, (picking, width, small)
+    assert "esc back" in footer_text(45, picking) or picking is None
+assert "y yes" in footer_text(100, "dialog") and "q quit" not in footer_text(100, "dialog")    # a question has only its own keys
+
+two = configured("[deck]\nrepos = o/alpha, o/beta\n")
+one = configured("[deck]\nrepos = o/alpha\n")
+
+
+def drawn(cfg_used, queue, pcs=(), width=110):
+    grid = terminal.Grid(30, width)
+    boxes.paint(grid, cfg_used, [], queue, None, 0, "", pcs=list(pcs))
+    return grid.text()
+
+
+nothing = types.SimpleNamespace(runs=[], requests=[], problem="", jobs={}, working={}, said="")
+stub = dict(name="pc", host="me@pc", service="x", now={}, cpu=[], gpu=[], state=lambda: ("listening", "", None, ""))
+down = types.SimpleNamespace(failed=True, reachable=lambda: False, **stub)
+fresh = types.SimpleNamespace(failed=False, reachable=lambda: False, **stub)
+up = types.SimpleNamespace(failed=False, reachable=lambda: True, **dict(stub, now={
+    "cpu": 10.0, "gpu": None, "load": 1.0, "threads": 4.0, "memory": (1.0, 8.0), "runner": "active", "log": []}, cpu=[10.0]))
+text = drawn(two, nothing, [down])
+assert "pc not answering" in text.splitlines()[0] and "╭─ pc" not in text         # no box: a line in the head says which
+assert "not answering" not in drawn(two, nothing, [fresh]).splitlines()[0]        # not asked yet: nothing said, no box
+assert "╭─ pc" in drawn(two, nothing, [up]) and "not answering" not in drawn(two, nothing, [up])
+
+def a_run(repo, number):
+    return {"repo": repo, "databaseId": number, "workflowName": "Build", "headBranch": "main", "headSha": "abcdef1234",
+            "status": "completed", "conclusion": "success", "createdAt": "2026-10-30T10:00:00Z"}
+
+asked_one = {"repo": "o/beta", "row": -1000001, "number": 1, "workflow": "Deploy", "branch": "main", "sha": "abcdef1", "note": "Mask lag"}
+both = types.SimpleNamespace(runs=[a_run("o/alpha", 1), a_run("o/alpha", 2)], requests=[asked_one], problem="", jobs={},
+                             working={}, said="")
+text = drawn(two, both)
+rows = [line for line in text.splitlines() if "Build" in line]
+assert len(rows) == 2 and all("alpha" in line for line in rows), rows       # all the runs shown are of alpha, and it says so
+assert any("Deploy" in line and "beta" in line and "Mask lag" in line for line in text.splitlines()), text
+rows = [line for line in drawn(one, both).splitlines() if "Build" in line]
+assert len(rows) == 2 and not any("alpha" in line for line in rows), rows         # one repository: nothing to tell apart
+assert boxes.repo_labels(["a/app", "b/lib"]) == {"a/app": "app", "b/lib": "lib"}
+assert boxes.repo_labels(["a/app", "b/app", "c/lib"]) == {"a/app": "a/app", "b/app": "b/app", "c/lib": "lib"}
 
 # --- one file from the package: it runs, and what it starts again (the watcher) finds itself
 with tempfile.TemporaryDirectory() as tmp:
