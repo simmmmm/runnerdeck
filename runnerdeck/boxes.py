@@ -262,10 +262,11 @@ def footer(canvas, y, width, note, picking=None):
         canvas.put(y, 1, note[:width - 2], "warm")
         return
     # The keys of the screen are always there, also while a run or a request is chosen: the
-    # ones of what is chosen come first. Where the width is short, the first three here stay
-    # (move, back, quit) and the others go from the right.
-    leave = "quit, runners stay on" if width >= 140 else "quit"
-    general = (("q", leave), ("m", "settings"), ("n", "new runner"), ("w", "approval"), ("h", "add computer"), ("s", "start"), ("x", "stop"), ("tab", "next log"))
+    # ones of what is chosen come first. What can be changed is in the settings (m), so n, w and
+    # h are not listed: they still work, and the menu names them. Where the width is short, the
+    # first three here stay (move, back, quit) and the others go from the right.
+    leave = "quit, runners stay on" if width >= 100 else "quit"
+    general = (("m", "settings"), ("s", "start"), ("x", "stop"), ("tab", "next log"), ("q", leave))
     keys = {"run": (("↑↓", "choose"), ("c", "cancel"), ("r", "run again"), ("o", "open"), ("esc", "back")) + general,
             "request": (("↑↓", "choose"), ("enter", "start"), ("d", "decline"), ("esc", "back")) + general,
             "dialog": (("y", "yes"), ("n", "no"), ("← →", "choose"), ("enter", "answer")),

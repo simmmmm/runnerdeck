@@ -67,9 +67,9 @@ service = actions-runner.service
 |---|---|
 | `q` or `Esc` | Leave. It asks first. Press `q` again to say yes. The runners keep running. |
 | `m` | Settings: add a runner, change the repositories, the workflows that wait for your yes, or the computers. |
-| `n` | Add a new runner. |
-| `w` | Choose again which workflows wait for your yes. |
-| `h` | Add a computer to watch over SSH. |
+| `n` | Add a new runner (also in the settings). |
+| `w` | Choose again which workflows wait for your yes (also in the settings). |
+| `h` | Add a computer to watch over SSH (also in the settings). |
 | `s` / `x` | Start / stop the runners. |
 | `Tab` | Show the log of the next runner. |
 | `↑` `↓` | Choose a run. |

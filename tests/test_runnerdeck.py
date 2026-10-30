@@ -858,7 +858,7 @@ if not system.WINDOWS:
             os.write(fd, text.encode())
             until(then)
 
-        until("approval")                                  # the footer says there is a key for it
+        until("settings")                                  # the footer has the key for the menu
         send("w", "Which workflows must wait")
         assert "[x] TestFlight" in seen and "[ ] CI" in seen   # what is set is chosen to begin with
         seen = ""
@@ -903,13 +903,15 @@ def footer_text(width, picking):
 
 for picking in ("run", "request", None):
     wide = footer_text(190, picking)
-    for key in ("q quit", "m settings", "n new runner", "w approval", "h add computer", "s start", "x stop", "tab next log"):
+    for key in ("q quit", "m settings", "s start", "x stop", "tab next log"):
         assert key in wide, (picking, key, wide)
+    for key in ("n new runner", "w approval", "h add computer"):             # these are in the settings, not on the line
+        assert key not in wide, (picking, key, wide)
 assert "runners stay on" in footer_text(190, None)
 assert "c cancel" in footer_text(190, "run") and "r run again" in footer_text(190, "run")        # what the chosen run can do
 assert "enter start" in footer_text(190, "request") and "d decline" in footer_text(190, "request")
 mid = footer_text(110, "run")                                                                  # a normal window: nothing needed is gone
-for key in ("↑↓ choose", "c cancel", "r run again", "esc back", "q quit", "m settings", "n new runner"):
+for key in ("↑↓ choose", "c cancel", "r run again", "esc back", "q quit", "m settings", "s start"):
     assert key in mid, (key, mid)
 for picking in ("run", "request", None):
     for width in (60, 45):                                                                     # a short one keeps move, back and quit
