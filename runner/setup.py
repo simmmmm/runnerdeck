@@ -57,10 +57,14 @@ class Checks:
 
 
 def make_runner(cfg, n, token):
-    """Sets up runner number n and starts it. Raises what went wrong."""
+    """Starts runner number n, after setting it up if it is not set up yet. A
+    runner that is there already is never downloaded or registered again.
+    Raises what went wrong."""
     runner = Runner(cfg, n)
-    set_up(cfg, runner, token, quiet=True)
-    runner.start()
+    if not runner.configured:
+        set_up(cfg, runner, token, quiet=True)
+    if not runner.running():
+        runner.start()
     return runner
 
 
@@ -267,16 +271,20 @@ class Wizard:
     def work(self):
         """The runners, one after the other, while the screen shows how far it is."""
         cfg, a = self.cfg, self.answers
-        token = a["token"] or gh_token(cfg)
-        if not token:
+        # A token is needed only for a runner that is not set up yet.
+        missing = [n for n in range(1, a["count"] + 1) if not Runner(cfg, n).configured]
+        token = (a["token"] or gh_token(cfg)) if missing else None
+        if missing and not token:
             self.progress.append(("bad", "No token. Press n on the main screen later to add the runners."))
         else:
             for n in range(1, a["count"] + 1):
                 name = Runner(cfg, n).name
-                self.progress.append(("dim", f"… {name}: download and register (this takes a minute)"))
+                self.progress.append(("dim", f"… {name}: " + ("starting" if Runner(cfg, n).configured
+                                                              else "download and register (this takes a minute)")))
                 try:
+                    ready = Runner(cfg, n).configured
                     self.make(cfg, n, token)
-                    self.progress[-1] = ("good", f"✓ {name} is running")
+                    self.progress[-1] = ("good", f"✓ {name} is running" + (" (it was set up already)" if ready else ""))
                 except (OSError, subprocess.SubprocessError) as err:
                     self.progress[-1] = ("bad", f"✗ {name}: {err}")
         self.working = False

@@ -291,6 +291,22 @@ with tempfile.TemporaryDirectory() as tmp:
     w.feed(127)
     assert w.field == shown[:-1]
 
+    # a runner that is set up already is not downloaded or registered again
+    with tempfile.TemporaryDirectory() as there:
+        calls = []
+        real_setup, real_start = runners.set_up, runners.Runner.start
+        runners.set_up = lambda cfg, runner, token, quiet=False: calls.append(("set_up", runner.name))
+        runners.Runner.start = lambda self: calls.append(("start", self.name))
+        setupmod.set_up, setupmod.Runner = runners.set_up, runners.Runner
+        os.makedirs(os.path.join(there, "r"))
+        open(os.path.join(there, "r", ".runner"), "w").close()          # box: set up already
+        local = configured("[deck]\nrepos = a/b\n[local]\nname = box\ndir = %s\ncount = 2\n" % os.path.join(there, "r"))
+        setupmod.make_runner(local, 1, "TOKEN12345")
+        setupmod.make_runner(local, 2, "TOKEN12345")
+        assert calls == [("start", "box"), ("set_up", "box-2"), ("start", "box-2")], calls
+        runners.set_up, runners.Runner.start = real_setup, real_start
+        setupmod.set_up = real_setup
+
     # the shortest way: one repository, nothing else; and the old file is kept
     made.clear()
     w = wizard_for()
