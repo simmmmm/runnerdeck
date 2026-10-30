@@ -48,7 +48,6 @@ Python 3.9 and its standard library only: copy the one file anywhere.
 import calendar
 import configparser
 import ctypes
-import curses
 import json
 import locale
 import os
@@ -58,9 +57,23 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+import urllib.request
+import zipfile
 from collections import deque
+
+try:
+    import curses
+except ImportError:  # Windows has none; the screen is drawn here, curses only hears the keys
+    curses = None
+WINDOWS = os.name == "nt"
+if WINDOWS:
+    import msvcrt
+# curses' own numbers for the keys the screen uses, so that Windows says the same.
+K_DOWN, K_UP, K_LEFT, K_RIGHT, K_BACKSPACE, K_ENTER, K_RESIZE = 258, 259, 260, 261, 263, 343, 410
+ENTER = (10, 13, K_ENTER)
 
 CONFIG = os.path.expanduser(os.environ.get("RUNNER_CONFIG", "~/.config/runner/config.ini"))
 SLUG = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -172,10 +185,40 @@ def alive(pidfile):
     try:
         with open(pidfile) as file:
             pid = int(file.read().strip())
-        os.kill(pid, 0)
-        return pid
+        return pid if exists(pid) else None
     except (OSError, ValueError):
         return None
+
+
+def exists(pid):
+    """Whether a process with this pid runs. Not os.kill(pid, 0): on Windows
+    that ends the process."""
+    if WINDOWS:
+        kernel = ctypes.windll.kernel32
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        kernel.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        handle = kernel.OpenProcess(0x1000, 0, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_uint32()
+        got = kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel.CloseHandle(handle)
+        return bool(got) and code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def apart():
+    """Popen's arguments for a process that outlives this one, in a session
+    of its own."""
+    if WINDOWS:
+        return {"creationflags": 0x08000000 | 0x00000200}  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+    return {"start_new_session": True}
 
 
 def write(pidfile, pid):
@@ -186,7 +229,9 @@ def write(pidfile, pid):
 def end(pidfile):
     """The process and everything it started: it was a session's leader."""
     pid = alive(pidfile)
-    if pid:
+    if pid and WINDOWS:
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    elif pid:
         try:
             os.killpg(pid, signal.SIGTERM)
         except OSError:
@@ -237,9 +282,10 @@ class Runner:
         # twice: "a session is already running".
         if os.path.exists(os.path.join(self.dir, ".service")):
             subprocess.run(["./svc.sh", "stop"], cwd=self.dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        script = os.path.join(self.dir, "run.cmd") if WINDOWS else "./run.sh"
         with open(self.log, "wb") as log:
-            process = subprocess.Popen(["./run.sh"], cwd=self.dir, stdin=subprocess.DEVNULL,
-                                       stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+            process = subprocess.Popen([script], cwd=self.dir, stdin=subprocess.DEVNULL,
+                                       stdout=log, stderr=subprocess.STDOUT, **apart())
         write(self.pidfile, process.pid)
 
     def stop(self):
@@ -610,6 +656,9 @@ for d in /sys/class/drm/card[0-9]/device; do
     done
     break
 done
+if command -v nvidia-smi >/dev/null 2>&1; then
+    echo "nvidia $(nvidia-smi --query-gpu=utilization.gpu,temperature.gpu,power.draw,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1)"
+fi
 for h in /sys/class/hwmon/hwmon*; do
     [ "$(cat "$h/name" 2>/dev/null)" = k10temp ] && echo "cpu_temp $(cat "$h/temp1_input" 2>/dev/null)"
 done
@@ -624,6 +673,26 @@ def clean(text):
     """Only what can be printed: a line from another machine must not move the
     cursor or colour the screen on this one."""
     return "".join(character for character in text if character.isprintable())
+
+
+def parse_nvidia(text):
+    """nvidia-smi's one line (utilization %, degrees, watts, MiB used, MiB all)
+    as the fields of a machine's answer; "[N/A]" and the like are left out."""
+    fields = [word.strip() for word in text.split(",")]
+    if len(fields) != 5:
+        return {}
+
+    def number(word, scale=1.0):
+        try:
+            return float(word) / scale
+        except ValueError:
+            return None
+
+    got = {"gpu": number(fields[0]), "gpu_temp": number(fields[1]), "gpu_power": number(fields[2])}
+    used, size = number(fields[3], 1024), number(fields[4], 1024)
+    if used is not None and size:
+        got["vram"] = (used, size)
+    return {key: value for key, value in got.items() if value is not None}
 
 
 def parse_pc(said):
@@ -660,6 +729,47 @@ def parse_pc(said):
     used, size = number("vram_used", 2**30), number("vram_total", 2**30)
     now["vram"] = (used, size) if used is not None and size else None
     now["log"] = [clean(line) for line in log.splitlines()]
+    # An AMD card's own files first; NVIDIA's tool for what they left empty.
+    for key, value in parse_nvidia(got.get("nvidia", "")).items():
+        if now.get(key) is None:
+            now[key] = value
+    return now
+
+
+def windows_here():
+    """This Windows machine in the shape of a machine's answer: the system's
+    own times and memory through ctypes; an NVIDIA card through nvidia-smi.
+    Heat and power of the processor are not given without a driver."""
+    kernel = ctypes.windll.kernel32
+
+    def times():
+        idle, system, user = (ctypes.c_uint64() for _ in range(3))
+        kernel.GetSystemTimes(ctypes.byref(idle), ctypes.byref(system), ctypes.byref(user))
+        return idle.value, system.value, user.value
+
+    first = times()
+    time.sleep(1)
+    second = times()
+    # The kernel's time includes the idle time.
+    total = (second[1] - first[1]) + (second[2] - first[2])
+    busy = 100 * (1 - (second[0] - first[0]) / total) if total > 0 else None
+
+    class Status(ctypes.Structure):
+        _fields_ = [("length", ctypes.c_uint32), ("load", ctypes.c_uint32), ("total", ctypes.c_uint64),
+                    ("free", ctypes.c_uint64), ("page_total", ctypes.c_uint64), ("page_free", ctypes.c_uint64),
+                    ("virtual_total", ctypes.c_uint64), ("virtual_free", ctypes.c_uint64), ("extended", ctypes.c_uint64)]
+
+    status = Status()
+    status.length = ctypes.sizeof(Status)
+    memory = None
+    if kernel.GlobalMemoryStatusEx(ctypes.byref(status)):
+        memory = ((status.total - status.free) / 2**30, status.total / 2**30)
+    now = {"threads": float(os.cpu_count() or 0), "load": None, "gpu": None, "cpu_temp": None, "gpu_temp": None,
+           "gpu_power": None, "runner": None, "cpu": busy, "memory": memory, "vram": None, "log": []}
+    if shutil.which("nvidia-smi"):
+        got = subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu,temperature.gpu,power.draw,memory.used,memory.total",
+                              "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10)
+        now.update(parse_nvidia(got.stdout.splitlines()[0] if got.returncode == 0 and got.stdout.strip() else ""))
     return now
 
 
@@ -670,11 +780,14 @@ def ask_pc(host, service=""):
     # an option to ssh.
     if (host is not None and not HOST.match(host)) or (service and not HOST.match(service)):
         return None
+    if host is None and WINDOWS:
+        return windows_here()
     command = ["sh", "-s", service]
     if host is not None:
-        command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ControlMaster=auto",
-                   "-o", "ControlPersist=120", "-o", "ControlPath=" + os.path.expanduser("~/.ssh/runner-%C"),
-                   "--", host, *command]
+        # Windows' ssh does not keep a connection open between calls.
+        keep = [] if WINDOWS else ["-o", "ControlMaster=auto", "-o", "ControlPersist=120",
+                                   "-o", "ControlPath=" + os.path.expanduser("~/.ssh/runner-%C")]
+        command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", *keep, "--", host, *command]
     got = subprocess.run(command, input=PC_ASKS, capture_output=True, text=True, timeout=20)
     return parse_pc(got.stdout) if got.returncode == 0 and got.stdout.strip() else None
 
@@ -726,35 +839,90 @@ class Pc:
 
 def registration_token():
     repo = LOCAL["repo"]
-    if shutil.which("gh"):
-        got = subprocess.run(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runners/registration-token",
-                              "--jq", ".token"], capture_output=True, text=True)
-        if got.returncode == 0 and got.stdout.strip():
-            return got.stdout.strip()
-    return input(f"A registration token (github.com/{repo} › Settings › Actions › Runners › "
-                 "New self-hosted runner): ").strip()
+    return gh_token() or input(f"A registration token (github.com/{repo} › Settings › Actions › Runners › "
+                               "New self-hosted runner): ").strip()
 
 
 def release():
     """The runner's download for this machine, GitHub's own names for them."""
-    system = {"Darwin": "osx", "Linux": "linux"}.get(platform.system())
-    arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x64", "AMD64": "x64"}.get(platform.machine())
+    system = {"Darwin": "osx", "Linux": "linux", "Windows": "win"}.get(platform.system())
+    arch = {"arm64": "arm64", "ARM64": "arm64", "aarch64": "arm64", "x86_64": "x64", "AMD64": "x64"}.get(platform.machine())
     if not system or not arch:
         raise OSError(f"no runner for {platform.system()} {platform.machine()}")
-    return f"https://github.com/actions/runner/releases/download/v{VERSION}/actions-runner-{system}-{arch}-{VERSION}.tar.gz"
+    pack = "zip" if system == "win" else "tar.gz"
+    return f"https://github.com/actions/runner/releases/download/v{VERSION}/actions-runner-{system}-{arch}-{VERSION}.{pack}"
 
 
-def set_up(runner, token):
-    print(f"Setting up {runner.name} in {runner.dir}")
-    os.makedirs(runner.dir, exist_ok=True)
-    url = release()
+def download(url, folder):
+    """The runner's files into a folder: curl and tar where there are, Python's
+    own where there are not."""
+    if WINDOWS:
+        pack = os.path.join(tempfile.gettempdir(), "runner-download.zip")
+        try:
+            urllib.request.urlretrieve(url, pack)
+            with zipfile.ZipFile(pack) as archive:
+                archive.extractall(folder)
+        except zipfile.BadZipFile:
+            raise OSError(f"{url} is not a zip")
+        finally:
+            if os.path.exists(pack):
+                os.remove(pack)
+        return
     curl = subprocess.Popen(["curl", "-fsSL", url], stdout=subprocess.PIPE)
-    subprocess.run(["tar", "xz", "-C", runner.dir], stdin=curl.stdout, check=True)
+    subprocess.run(["tar", "xz", "-C", folder], stdin=curl.stdout, check=True)
     curl.stdout.close()
     if curl.wait():
         raise OSError(f"could not download {url}")
-    subprocess.run(["./config.sh", "--url", f"https://github.com/{LOCAL['repo']}", "--token", token,
-                    "--name", runner.name, "--unattended", "--replace"], cwd=runner.dir, check=True)
+
+
+def set_up(runner, token, quiet=False):
+    """Downloads a runner into its folder and registers it. Quiet, for the
+    screen: what the tools say is kept for the error, not printed over it."""
+    if not quiet:
+        print(f"Setting up {runner.name} in {runner.dir}")
+    os.makedirs(runner.dir, exist_ok=True)
+    download(release(), runner.dir)
+    config = [os.path.join(runner.dir, "config.cmd")] if WINDOWS else ["./config.sh"]
+    got = subprocess.run([*config, "--url", f"https://github.com/{LOCAL['repo']}", "--token", token,
+                          "--name", runner.name, "--unattended", "--replace"], cwd=runner.dir,
+                         capture_output=quiet, text=True)
+    if got.returncode:
+        raise OSError(((got.stderr or got.stdout or "").strip()[-300:] if quiet else "") or f"config exited {got.returncode}")
+
+
+TOKEN = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
+
+
+def add_runner(runners, token):
+    """A new runner next to the others, from a registration token (or from
+    `gh`, when none is given): what to say of it, and whether it went."""
+    token = token.strip()
+    if token and not TOKEN.match(token):
+        return "That is not a registration token: letters and digits only", False
+    token = token or gh_token()
+    if not token:
+        return "gh could not make a token: paste one from Settings › Actions › Runners › New self-hosted runner", False
+    runner = Runner(len(runners) + 1)
+    try:
+        set_up(runner, token, quiet=True)
+        runner.start()
+    except (OSError, subprocess.SubprocessError) as err:
+        return f"{runner.name} is not set up: {err}", False
+    runners.append(runner)
+    # The watcher knows the runners it started with: it begins again with this one too.
+    if alive(WATCH):
+        end(WATCH)
+        keep_watch()
+    return f"{runner.name} is up", True
+
+
+def gh_token():
+    """A registration token from `gh`, when it may make one (admin of the repository)."""
+    if not shutil.which("gh"):
+        return None
+    got = subprocess.run(["gh", "api", "-X", "POST", f"repos/{LOCAL['repo']}/actions/runners/registration-token",
+                          "--jq", ".token"], capture_output=True, text=True)
+    return got.stdout.strip() if got.returncode == 0 and got.stdout.strip() else None
 
 
 def start_all(runners):
@@ -775,9 +943,14 @@ def start_all(runners):
             print("Still locked: signing fails until it is unlocked.")
     for runner in stopped:
         runner.start()
-    if not alive(AWAKE) and shutil.which("caffeinate"):
-        awake = subprocess.Popen(["caffeinate", "-ims"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL, start_new_session=True)
+    if not alive(AWAKE) and (shutil.which("caffeinate") or WINDOWS):
+        # macOS: caffeinate. Windows: a process of its own that asks to keep
+        # the system awake (ES_CONTINUOUS | ES_SYSTEM_REQUIRED) for as long as it lives.
+        command = ["caffeinate", "-ims"] if not WINDOWS else [
+            sys.executable, "-c",
+            "import ctypes, time\nctypes.windll.kernel32.SetThreadExecutionState(0x80000001)\nwhile True: time.sleep(3600)"]
+        awake = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, **apart())
         write(AWAKE, awake.pid)
     keep_watch()
 
@@ -787,7 +960,7 @@ def keep_watch():
     they are."""
     if not alive(WATCH):
         watcher = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--watch"], stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **apart())
         write(WATCH, watcher.pid)
 
 
@@ -806,6 +979,16 @@ def notify(title, words, sound):
         command = ["osascript", "-e", f"display notification {quoted(words)} with title {quoted(title)} sound name {quoted(sound)}"]
     elif shutil.which("notify-send"):
         command = ["notify-send", "--", title, words]
+    elif WINDOWS and shutil.which("powershell"):
+        # The words go in the environment, not in the script: no quoting to get wrong.
+        script = ("Add-Type -AssemblyName System.Windows.Forms, System.Drawing; "
+                  "$n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; "
+                  "$n.Visible = $true; $n.ShowBalloonTip(5000, $env:RUNNER_TITLE, $env:RUNNER_WORDS, "
+                  "[System.Windows.Forms.ToolTipIcon]::Info); Start-Sleep 6; $n.Dispose()")
+        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", script],
+                         env=dict(os.environ, RUNNER_TITLE=title, RUNNER_WORDS=words),
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **apart())
+        return
     else:
         return
     subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -857,6 +1040,89 @@ class Grid:
         return "\n".join("".join(row).rstrip() for row in self.rows).rstrip()
 
 
+class CursesTerminal:
+    """Keys and size through curses, which is all it is used for."""
+
+    def __init__(self, window):
+        self.window = window
+        try:
+            curses.curs_set(0)
+        except curses.error:
+            pass
+        window.timeout(1000)
+        # curses clears the screen once, at its first refresh: not over a frame.
+        window.refresh()
+
+    def size(self):
+        return self.window.getmaxyx()
+
+    def key(self):
+        return self.window.getch()
+
+    def leave(self):
+        curses.endwin()
+
+    def back(self):
+        self.window.clear()
+        self.window.refresh()
+
+
+class ConsoleTerminal:
+    """The same on Windows, which has no curses: the console is told to read
+    the escape sequences the screen is drawn with, the keys come from msvcrt,
+    and the screen is the console's alternate one."""
+
+    def __init__(self):
+        self.shape = None
+
+    def __enter__(self):
+        kernel = ctypes.windll.kernel32
+        kernel.GetStdHandle.restype = ctypes.c_void_p
+        kernel.GetConsoleMode.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+        kernel.SetConsoleMode.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        self.handle = kernel.GetStdHandle(-11)
+        mode = ctypes.c_uint32()
+        self.mode = mode.value if kernel.GetConsoleMode(self.handle, ctypes.byref(mode)) else None
+        if self.mode is not None:
+            kernel.SetConsoleMode(self.handle, self.mode | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        kernel.SetConsoleOutputCP(65001)
+        self.back()
+        return self
+
+    def __exit__(self, *error):
+        self.leave()
+        if self.mode is not None:
+            ctypes.windll.kernel32.SetConsoleMode(self.handle, self.mode)
+
+    def size(self):
+        columns, lines = shutil.get_terminal_size()
+        return lines, columns
+
+    def key(self):
+        """A key within a second, or -1; a changed size is a key too."""
+        end = time.time() + 1
+        while time.time() < end:
+            if msvcrt.kbhit():
+                character = msvcrt.getwch()
+                if character in ("\x00", "\xe0"):
+                    return {"H": K_UP, "P": K_DOWN, "K": K_LEFT, "M": K_RIGHT}.get(msvcrt.getwch(), 0)
+                return ord("q") if character == "\x03" else ord(character)
+            if self.shape is not None and self.size() != self.shape:
+                self.shape = self.size()
+                return K_RESIZE
+            time.sleep(0.05)
+        return -1
+
+    def leave(self):
+        sys.stdout.write("\x1b[?25h\x1b[?1049l")
+        sys.stdout.flush()
+
+    def back(self):
+        sys.stdout.write("\x1b[?1049h\x1b[?25l\x1b[2J")
+        sys.stdout.flush()
+        self.shape = self.size()
+
+
 class Screen:
     """The terminal, drawn here and not through curses, which now only hears
     the keys. The Mac's Python has the curses that counts bytes: "─" and "█"
@@ -864,7 +1130,7 @@ class Screen:
     frame at a time, over the last, so nothing flickers."""
 
     def __init__(self, window):
-        self.height, self.width = window.getmaxyx()
+        self.height, self.width = window.size()
         self.rows = [[(" ", "")] * self.width for _ in range(self.height)]
 
     def put(self, y, x, text, style=""):
@@ -1196,6 +1462,12 @@ def popup(canvas, dialog):
         canvas.put(row, x + width - 1, "│", "pop-frame")
     canvas.put(y + height - 1, x, "╰" + "─" * max(0, width - 2) + "╯", "pop-frame")
     canvas.put(y + 2, x + (width - len(words)) // 2, words[:width - 4], "pop-strong")
+    if "field" in dialog:
+        # What is typed or pasted, hidden but for how long it is.
+        shown = ("●" * len(dialog["field"]))[-(width - 8):]
+        canvas.put(y + 4, x + 3, "› " + shown + "▏", "pop")
+        canvas.put(y + 6, x + 3, "enter: set up · empty: ask gh · esc: cancel"[:width - 6], "pop-frame")
+        return
     # Which one Enter takes, in the words too and not only in the colour.
     yes = f" ▸ {dialog['yes']} " if dialog["focus"] else f"   {dialog['yes']} "
     no = f"   {dialog['no']} " if dialog["focus"] else f" ▸ {dialog['no']} "
@@ -1223,7 +1495,8 @@ def footer(canvas, y, width, note, picking=None):
     keys = {"run": (("↑↓", "choose"), ("c", "cancel"), ("r", "run again"), ("o", "open"), ("esc", "back")),
             "request": (("↑↓", "choose"), ("enter", "start"), ("d", "decline"), ("esc", "back")),
             "dialog": (("y", "yes"), ("n", "no"), ("← →", "choose"), ("enter", "answer")),
-            None: (("q", "leave, they keep running"), ("s", "start"), ("x", "stop"), ("tab", "another log"), ("↑↓", "choose"))}[picking]
+            "field": (("enter", "set up"), ("esc", "cancel")),
+            None: (("q", "leave, they keep running"), ("s", "start"), ("x", "stop"), ("n", "new runner"), ("tab", "another log"), ("↑↓", "choose"))}[picking]
     for key, words in keys:
         canvas.put(y, x, key, "strong")
         canvas.put(y, x + len(key) + 1, words, "label")
@@ -1254,25 +1527,16 @@ def paint(canvas, runners, queue, machine, shown, note, picked=None, dialog=None
         y = github_box(canvas, y, width, queue.runs[:max(1, min(len(queue.runs), room - 7))], picked, queue.working)
     if runners and height - 1 - y >= 3:
         log_box(canvas, y, width, height - 1 - y, runners[shown])
-    picking = "dialog" if dialog else None if picked is None else "request" if picked < 0 else "run"
+    picking = (("field" if "field" in dialog else "dialog") if dialog else None if picked is None
+               else "request" if picked < 0 else "run")
     if dialog:
         popup(canvas, dialog)
     # Last: its keys are read while a popup is up too.
     footer(canvas, height - 1, width, "" if dialog else note, picking)
 
 
-ENTER = (10, 13, curses.KEY_ENTER)
-
-
 def show(window, runners, queue, machine, pcs=()):
-    try:
-        curses.curs_set(0)
-    except curses.error:
-        pass
     colours()
-    window.timeout(1000)
-    # curses clears the screen once, at its first refresh: not over a frame.
-    window.refresh()
     # By its row, not its place: the list moves as runs come in.
     shown, note, picked, dialog = 0, "", None, None
 
@@ -1316,19 +1580,30 @@ def show(window, runners, queue, machine, pcs=()):
         screen = Screen(window)
         paint(screen, runners, queue, machine, shown, note, picked, dialog, pcs)
         screen.flush()
-        key = window.getch()
+        key = window.key()
         if key == -1:
             continue
-        if key == curses.KEY_RESIZE:
+        if key == K_RESIZE:
             sys.stdout.buffer.write(b"\x1b[2J")
+            continue
+        if dialog and "field" in dialog:
+            if key in ENTER:
+                then, value, dialog = dialog["then"], dialog["field"], None
+                then(value)
+            elif key == 27:
+                dialog = None
+            elif key in (8, 127, K_BACKSPACE):
+                dialog["field"] = dialog["field"][:-1]
+            elif 32 <= key < 127:
+                dialog["field"] += chr(key)
             continue
         if dialog:
             # Each arrow to its own side: both flipping it, → on the answer
             # already chosen chose the other, and a run was cancelled that
             # was meant to go on.
-            if key == curses.KEY_LEFT:
+            if key == K_LEFT:
                 dialog["focus"] = True
-            elif key == curses.KEY_RIGHT:
+            elif key == K_RIGHT:
                 dialog["focus"] = False
             elif key == 9:
                 dialog["focus"] = not dialog["focus"]
@@ -1345,9 +1620,9 @@ def show(window, runners, queue, machine, pcs=()):
             return
         requests, runs = queue.requests, queue.runs or []
         items = [*requests, *runs]
-        if key in (curses.KEY_UP, curses.KEY_DOWN) and items:
+        if key in (K_UP, K_DOWN) and items:
             rows = [row_of(item) for item in items]
-            step = 1 if key == curses.KEY_DOWN else -1
+            step = 1 if key == K_DOWN else -1
             at = rows.index(picked) + step if picked in rows else 0
             picked, note = rows[max(0, min(at, len(rows) - 1))], ""
             continue
@@ -1377,11 +1652,20 @@ def show(window, runners, queue, machine, pcs=()):
         elif key == 9 and runners:
             shown = (shown + 1) % len(runners)
         elif key == ord("s"):
-            curses.endwin()
+            window.leave()
             start_all(runners)
-            window.clear()
-            window.refresh()
+            window.back()
             note = ""
+        elif key == ord("n"):
+            def make(token):
+                def work():
+                    queue.said = add_runner(runners, token)[0]
+                threading.Thread(target=work, daemon=True).start()
+                queue.said = "Setting up a new runner…"
+            if LOCAL:
+                dialog = {"title": "New runner", "words": f"Registration token for {LOCAL['repo']}", "field": "", "then": make}
+            else:
+                note = "Runners here need a [local] section in the config"
 
 
 def read(path):
@@ -1399,6 +1683,12 @@ def install():
     target = os.path.expanduser("~/runner.py")
     if os.path.abspath(__file__) != target:
         shutil.copyfile(__file__, target)
+    if WINDOWS:
+        command = os.path.expanduser("~/runner.cmd")
+        with open(command, "w") as file:
+            file.write(f'@"{sys.executable}" "%~dp0runner.py" %*\r\n')
+        print(f"{target} and {command}: put {os.path.dirname(command)} on the PATH and `runner` opens it.")
+        return
     rc = os.path.expanduser("~/.zshrc" if os.path.basename(os.environ.get("SHELL", "")) == "zsh" else "~/.bashrc")
     if "runner.py" not in read(rc):
         with open(rc, "a") as file:
@@ -1424,8 +1714,29 @@ def machines(once=False):
     return here, pcs + [Pc(host["name"], host["ssh"], host["service"], once) for host in HOSTS]
 
 
+def runner_count():
+    """The configured count, or more where more are set up on disk: a runner
+    made from the screen is not in the config."""
+    count = LOCAL["count"]
+    while Runner(count + 1).configured:
+        count += 1
+    return count
+
+
+def screen(*args):
+    if WINDOWS:
+        with ConsoleTerminal() as terminal:
+            show(terminal, *args)
+    elif curses is None:
+        sys.exit("runner: this Python has no curses")
+    else:
+        curses.wrapper(lambda window: show(CursesTerminal(window), *args))
+
+
 def main(args):
     locale.setlocale(locale.LC_ALL, "")
+    if WINDOWS:
+        sys.stdout.reconfigure(encoding="utf-8")
     if "--help" in args or "-h" in args:
         print(__doc__)
         return
@@ -1436,7 +1747,7 @@ def main(args):
         load()
     except (ConfigError, ValueError) as err:
         sys.exit(f"runner: {err}")
-    runners = [Runner(n) for n in range(1, LOCAL["count"] + 1)] if LOCAL else []
+    runners = [Runner(n) for n in range(1, runner_count() + 1)] if LOCAL else []
     if "--install" in args:
         install()
         return
@@ -1455,7 +1766,7 @@ def main(args):
     if any(runner.running() for runner in runners):
         keep_watch()
     here, pcs = machines()
-    curses.wrapper(show, runners, Queue(), here, pcs)
+    screen(runners, Queue(), here, pcs)
 
 
 if __name__ == "__main__":

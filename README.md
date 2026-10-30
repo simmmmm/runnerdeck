@@ -11,7 +11,7 @@ they work on, on one btop-style screen in the terminal.
 - **Approval:** workflows only a person may start. An issue asks for one; you
   start it from the screen, after a question, or decline it.
 
-One file, Python 3.9 and its standard library only. Needs [`gh`](https://cli.github.com)
+One file, Python 3.9 and its standard library only, on macOS, Linux and Windows. Needs [`gh`](https://cli.github.com)
 for the runs, and ssh keys for other machines (never a password prompt).
 
 ## Use
@@ -25,6 +25,11 @@ python3 runner.py --install    # copies itself to ~/runner.py and adds `runner`
 ```
 
 q leaves, the runners keep running. x stops them, s starts them.
+
+**n makes a new runner.** Paste the registration token (Settings › Actions ›
+Runners › New self-hosted runner) and press enter; leave it empty and `gh` asks
+for one, if you are admin of the repository. The runner is downloaded, registered
+as the next `name-N` and started. The token is shown only as dots and is not stored.
 
 ## Config
 
@@ -65,12 +70,20 @@ host. runner stores no secret.
   before it is drawn.
 - Config values that reach `gh`, ssh or a file name are checked when it is read.
 - A remote host is Linux. The box for a Mac is read with the Mac's own tools, so
-  only the Mac you run it on.
+  only the Mac you run it on, and a Windows machine likewise (the system's own
+  times and memory, and an NVIDIA card through `nvidia-smi`; no processor heat).
 
 ## Not done yet
 
 - Not run against real GPU hardware: the amdgpu and k10temp files are read as the
-  kernel documents them, tested with recorded output. NVIDIA is not read.
+  kernel documents them, and `nvidia-smi` as its documentation says, tested with
+  recorded output and stand-in tools.
+- **Windows has never been run by a person.** What is Windows' own (keys from
+  `msvcrt`, the console's escape sequences, processes, the readings, notifications
+  through PowerShell, `config.cmd`) was written from the documentation and is tried
+  by `ci/test.yml` (to move to `.github/workflows/`, see `ci/README.md`) on `windows-latest`, which tests the processes
+  and the readings, not the screen. A person with a Windows machine should open
+  it once.
 - Not tried on a real runner journal on Linux, or on Python 3.9 itself (syntax is
   checked for 3.9, tests ran on a newer Python).
 - No licence is chosen yet.
