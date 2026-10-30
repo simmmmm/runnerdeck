@@ -691,6 +691,27 @@ if not system.WINDOWS:
         out = subprocess.run([sys.executable, "-m", "runnerdeck", "--status"], env=env, cwd=tmp, capture_output=True, text=True, timeout=60)
         assert out.returncode == 0 and "Welcome" not in out.stdout and "◐ runnerdeck" in out.stdout, out.stderr
 
+# --- the command: what the installation wrote is said, and a second time it is not written again
+if not system.WINDOWS:
+    from runnerdeck import app
+    with tempfile.TemporaryDirectory() as home:
+        saved = {key: os.environ.get(key) for key in ("HOME", "SHELL")}
+        try:
+            os.environ["HOME"], os.environ["SHELL"] = home, "/bin/zsh"
+            first = app.install()
+            rc = os.path.join(home, ".zshrc")
+            assert os.path.exists(os.path.join(home, "runnerdeck.pyz")) and ".zshrc" in first
+            assert "Added to " + rc in first and "alias runnerdeck=" in first, first
+            assert open(rc).read().count("alias runnerdeck=") == 1
+            second = app.install()
+            assert "already" in second and "Added to" not in second and open(rc).read().count("alias runnerdeck=") == 1
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
 # --- the key w on the main screen opens the list again, and saves to the config that is there
 if not system.WINDOWS:
     import pty, select, fcntl, termios, struct

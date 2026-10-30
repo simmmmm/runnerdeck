@@ -198,10 +198,15 @@ def install():
             file.write(f'@"{sys.executable}" "%~dp0runnerdeck.pyz" %*\r\n')
         return f"{target} and {command} are made.\nPut {os.path.dirname(command)} on your PATH. Then type: runnerdeck"
     rc = os.path.expanduser("~/.zshrc" if os.path.basename(os.environ.get("SHELL", "")) == "zsh" else "~/.bashrc")
-    if "runnerdeck.pyz" not in read(rc):
+    line = f"alias runnerdeck='{sys.executable} ~/runnerdeck.pyz'"
+    if "alias runnerdeck=" in read(rc):
+        said = f"The alias is in {rc} already."
+    else:
         with open(rc, "a") as file:
-            file.write(f"\n# runnerdeck: starts the runners and shows them\nalias runnerdeck='{sys.executable} ~/runnerdeck.pyz'\n")
-    return f"Open a new terminal window. Then type: runnerdeck\n(Or run: source {rc})\nThe program is in {target}."
+            file.write(f"\n# runnerdeck: starts the runners and shows them\n{line}\n")
+        said = f"Added to {rc}: {line}"
+    return (f"Open a new terminal window. Then type: runnerdeck\n(Or run: source {rc})\n{said}\n"
+            f"The program is in {target}.")
 
 
 def init():
