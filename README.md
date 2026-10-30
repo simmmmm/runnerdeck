@@ -82,4 +82,4 @@ service = actions-runner.service
 
 - The program grew from a script that ran on a Mac. This version has only run with recorded data and stand-in tools.
 - No person has run it on Windows. The Windows code is the least tested.
-- There is no license yet.
+- The license is [MIT](LICENSE).
