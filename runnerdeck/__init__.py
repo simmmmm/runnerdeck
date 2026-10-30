@@ -1,13 +1,13 @@
-"""runner: self-hosted GitHub Actions runners, the machines they run on and
+"""runnerdeck: self-hosted GitHub Actions runners, the machines they run on and
 the runs they work on, on one btop-style screen in the terminal.
 
-    runner             start the local runners that are not running, then the screen.
+    runnerdeck             start the local runners that are not running, then the screen.
                        The first time, questions on the screen make the config first.
-    runner --setup     ask the questions again (the old config is kept as config.ini.bak)
-    runner --init      write an example config file, to edit by hand
-    runner --status    the screen once, as text; starts nothing
-    runner --install   copy this to ~/runner.pyz, and `runner` in your shell
-    runner --build F   make one file F (runner.pyz) of the package
+    runnerdeck --setup     ask the questions again (the old config is kept as config.ini.bak)
+    runnerdeck --init      write an example config file, to edit by hand
+    runnerdeck --status    the screen once, as text; starts nothing
+    runnerdeck --install   copy this to ~/runnerdeck.pyz, and `runnerdeck` in your shell
+    runnerdeck --build F   make one file F (runnerdeck.pyz) of the package
 
 What it shows: this machine (CPU, GPU, memory, power, heat; macOS or Linux),
 other machines over ssh, the runners on this machine (what each is doing and how
@@ -16,7 +16,7 @@ far its job is), the last runs of your repositories, and the log of one runner.
 cannot be taken back asks first, in a box in the middle.
 
 Add a repository, say what runners it has, and that is all: a config file
-(~/.config/runner/config.ini, or RUNNER_CONFIG), see --init.
+(~/.config/runnerdeck/config.ini, or RUNNERDECK_CONFIG), see --init.
 
     [deck]
     repos = owner/name, owner/other        # what `gh` reads runs from
@@ -45,6 +45,6 @@ Local runners run apart from the screen, in sessions of their own, so leaving it
 (--watch) beside them notifies for every job that ends (osascript, or
 notify-send) and writes it to jobs.log in the first runner's folder.
 
-Python 3.9 and its standard library only. `python3 -m runner --build runner.pyz` makes one file of it:
+Python 3.9 and its standard library only. `python3 -m runnerdeck --build runnerdeck.pyz` makes one file of it:
 copy that anywhere.
 """

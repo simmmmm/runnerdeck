@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""python3 tests/test_runner.py — config, requests, the machine's answer, the screen, one file."""
+"""python3 tests/test_runnerdeck.py — config, requests, the machine's answer, the screen, one file."""
 import configparser
 import os
 import re
@@ -11,7 +11,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from runner import config as configmod, github, machines, runners, system, terminal
+from runnerdeck import config as configmod, github, machines, runners, system, terminal
 
 
 def configured(text):
@@ -119,7 +119,7 @@ if terminal.curses:
 
 # --- it loads where there is no curses, as on Windows
 out = subprocess.run([sys.executable, "-c", "import sys; sys.modules['curses'] = None; sys.path.insert(0, %r); "
-                      "import runner.app, runner.terminal; assert runner.terminal.curses is None" % ROOT], capture_output=True, text=True)
+                      "import runnerdeck.app, runnerdeck.terminal; assert runnerdeck.terminal.curses is None" % ROOT], capture_output=True, text=True)
 assert out.returncode == 0, out.stderr
 
 # --- a new runner from a pasted token: what is refused, and what is made
@@ -179,23 +179,50 @@ else:
         config = os.path.join(tmp, "config.ini")
         with open(config, "w") as file:
             file.write("[deck]\nrepos = a/b\n[host workstation]\nssh = me@box\nservice = runner.service\n")
-        env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"], RUNNER_CONFIG=config, RUNNER_HOME=tmp)
-        out = subprocess.run([sys.executable, "-m", "runner", "--status"], env=env, cwd=ROOT,
+        env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"], RUNNERDECK_CONFIG=config, RUNNERDECK_HOME=tmp)
+        out = subprocess.run([sys.executable, "-m", "runnerdeck", "--status"], env=env, cwd=ROOT,
                              capture_output=True, text=True, timeout=60)
         assert out.returncode == 0, out.stderr
-        assert "workstation" in out.stdout and "box" in out.stdout and "◐ runner" in out.stdout, out.stdout
+        assert "workstation" in out.stdout and "box" in out.stdout and "◐ runnerdeck" in out.stdout, out.stdout
         # No config: it says what to do, and does not draw.
-        env["RUNNER_CONFIG"] = os.path.join(tmp, "none.ini")
-        out = subprocess.run([sys.executable, "-m", "runner", "--status"], env=env, cwd=ROOT, capture_output=True, text=True)
+        env["RUNNERDECK_CONFIG"] = os.path.join(tmp, "none.ini")
+        out = subprocess.run([sys.executable, "-m", "runnerdeck", "--status"], env=env, cwd=ROOT, capture_output=True, text=True)
         assert out.returncode != 0 and "--init" in out.stderr, out.stderr
         # --init writes an example that is itself a valid config, and does not overwrite.
-        out = subprocess.run([sys.executable, "-m", "runner", "--init"], env=env, cwd=ROOT, capture_output=True, text=True)
-        assert out.returncode == 0 and os.path.exists(env["RUNNER_CONFIG"]), out.stderr
-        cfg = configured(open(env["RUNNER_CONFIG"]).read())
+        out = subprocess.run([sys.executable, "-m", "runnerdeck", "--init"], env=env, cwd=ROOT, capture_output=True, text=True)
+        assert out.returncode == 0 and os.path.exists(env["RUNNERDECK_CONFIG"]), out.stderr
+        cfg = configured(open(env["RUNNERDECK_CONFIG"]).read())
         assert cfg.repos == ["owner/name"] and cfg.local is None      # watch only: an example must not set up runners
 
 
     assert "creationflags" not in system.apart() and system.exists(os.getpid()) and not system.exists(2**22 + 12345)
+
+# --- the program was called runner first: an old config or variable is still found, a new one wins
+with tempfile.TemporaryDirectory() as home:
+    saved = {key: os.environ.get(key) for key in ("HOME", "RUNNERDECK_CONFIG", "RUNNER_CONFIG")}
+    try:
+        os.environ["HOME"] = home
+        os.environ.pop("RUNNERDECK_CONFIG", None)
+        os.environ.pop("RUNNER_CONFIG", None)
+        new_file, old_file = (os.path.join(home, ".config", name, "config.ini") for name in ("runnerdeck", "runner"))
+        assert configmod.default_path() == new_file                      # nothing there yet: where a new one goes
+        os.makedirs(os.path.dirname(old_file))
+        open(old_file, "w").write("[deck]\nrepos = a/b\n")
+        assert configmod.default_path() == old_file                      # only the old one: it is used, the setup does not start
+        assert configmod.load().repos == ["a/b"]
+        os.makedirs(os.path.dirname(new_file))
+        open(new_file, "w").write("[deck]\nrepos = c/d\n")
+        assert configmod.default_path() == new_file                      # both: the new one wins
+        os.environ["RUNNER_CONFIG"] = "/old/variable.ini"
+        assert configmod.default_path() == "/old/variable.ini"           # the old variable still works
+        os.environ["RUNNERDECK_CONFIG"] = "/new/variable.ini"
+        assert configmod.default_path() == "/new/variable.ini"           # and the new one is first
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 # --- the config examples in the documents are valid, so they cannot drift
 import glob
@@ -209,7 +236,7 @@ for path in glob.glob(os.path.join(ROOT, "README.md")) + glob.glob(os.path.join(
 assert blocks >= 6, blocks  # the examples in the README and in docs/config.md
 
 # --- the first start: the questions, fed keys, with stand-ins for gh, ssh and the downloads
-from runner import setup as setupmod
+from runnerdeck import setup as setupmod
 
 
 class Checks:
@@ -617,11 +644,11 @@ if not system.WINDOWS:
                 file.write(body)
             os.chmod(os.path.join(tmp, name), 0o755)
         env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"], HOME=tmp, SHELL="/bin/bash", TERM="xterm-256color",
-                   RUNNER_CONFIG=os.path.join(tmp, "c", "config.ini"), RUNNER_HOME=tmp, PYTHONPATH=ROOT)
+                   RUNNERDECK_CONFIG=os.path.join(tmp, "c", "config.ini"), RUNNERDECK_HOME=tmp, PYTHONPATH=ROOT)
         pid, fd = pty.fork()
         if pid == 0:
             os.chdir(tmp)
-            os.execvpe(sys.executable, [sys.executable, "-m", "runner"], env)
+            os.execvpe(sys.executable, [sys.executable, "-m", "runnerdeck"], env)
         fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
         seen = ""
 
@@ -650,7 +677,7 @@ if not system.WINDOWS:
         send("owner/name\r", "How many runners")
         send("0\r", "second computer")
         send("n", "approval")
-        send("n", "runner` command")
+        send("n", "runnerdeck` command")
         send("y", "This is the config file")
         send("\r", "Setup is done")
         send("\r", "gh did not answer")        # the main screen, saying why there are no runs
@@ -658,11 +685,11 @@ if not system.WINDOWS:
         _, status = os.waitpid(pid, 0)
         assert os.WEXITSTATUS(status) == 0, status
         assert active(open(os.path.join(tmp, "c", "config.ini")).read()) == "[deck]\nrepos = owner/name\n"
-        assert os.path.getsize(os.path.join(tmp, "runner.pyz")) > 1000
-        assert "alias runner=" in open(os.path.join(tmp, ".bashrc")).read()
+        assert os.path.getsize(os.path.join(tmp, "runnerdeck.pyz")) > 1000
+        assert "alias runnerdeck=" in open(os.path.join(tmp, ".bashrc")).read()
         # And the program started again finds its config and does not ask.
-        out = subprocess.run([sys.executable, "-m", "runner", "--status"], env=env, cwd=tmp, capture_output=True, text=True, timeout=60)
-        assert out.returncode == 0 and "Welcome" not in out.stdout and "◐ runner" in out.stdout, out.stderr
+        out = subprocess.run([sys.executable, "-m", "runnerdeck", "--status"], env=env, cwd=tmp, capture_output=True, text=True, timeout=60)
+        assert out.returncode == 0 and "Welcome" not in out.stdout and "◐ runnerdeck" in out.stdout, out.stderr
 
 # --- the key w on the main screen opens the list again, and saves to the config that is there
 if not system.WINDOWS:
@@ -675,11 +702,11 @@ if not system.WINDOWS:
         config_file = os.path.join(tmp, "config.ini")
         open(config_file, "w").write("# mine\n[deck]\nrepos = owner/name\n\n[approval]\nworkflows = TestFlight\nlabel = testflight-request\n")
         env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"], HOME=tmp, TERM="xterm-256color",
-                   RUNNER_CONFIG=config_file, RUNNER_HOME=tmp, PYTHONPATH=ROOT)
+                   RUNNERDECK_CONFIG=config_file, RUNNERDECK_HOME=tmp, PYTHONPATH=ROOT)
         pid, fd = pty.fork()
         if pid == 0:
             os.chdir(tmp)
-            os.execvpe(sys.executable, [sys.executable, "-m", "runner"], env)
+            os.execvpe(sys.executable, [sys.executable, "-m", "runnerdeck"], env)
         fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 110, 0, 0))
         seen = ""
 
@@ -725,8 +752,8 @@ if not system.WINDOWS:
 
 # --- one file from the package: it runs, and what it starts again (the watcher) finds itself
 with tempfile.TemporaryDirectory() as tmp:
-    from runner import app
-    pyz = os.path.join(tmp, "runner.pyz")
+    from runnerdeck import app
+    pyz = os.path.join(tmp, "runnerdeck.pyz")
     app.build(pyz)
     assert os.path.getsize(pyz) < 200_000
     ini = os.path.join(tmp, "c.ini")
@@ -734,13 +761,13 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(ini, "w") as file:
         file.write("[deck]\nrepos = a/b\n[local]\nname = box\ndir = %s\ncount = 1\n" % os.path.join(tmp, "r"))
     os.makedirs(os.path.join(tmp, "r"))
-    env = dict(os.environ, RUNNER_CONFIG=ini, PYTHONPATH=pyz)  # as if run from the file: only the archive to import from
+    env = dict(os.environ, RUNNERDECK_CONFIG=ini, PYTHONPATH=pyz)  # as if run from the file: only the archive to import from
     env.pop("PYTHONHOME", None)
-    out = subprocess.run([sys.executable, "-c", "from runner import system; command, env = system.own_command('x'); "
+    out = subprocess.run([sys.executable, "-c", "from runnerdeck import system; command, env = system.own_command('x'); "
                           "print(env['PYTHONPATH'].split(system.os.pathsep)[0]); print(command[1:])"],
                          env=env, cwd=tmp, capture_output=True, text=True)
-    assert out.returncode == 0 and out.stdout.splitlines()[0] == pyz and out.stdout.splitlines()[1] == "['-m', 'runner', 'x']", out
-    started = subprocess.run([sys.executable, "-c", "from runner import config, runners; cfg = config.load(); runners.keep_watch(cfg); "
+    assert out.returncode == 0 and out.stdout.splitlines()[0] == pyz and out.stdout.splitlines()[1] == "['-m', 'runnerdeck', 'x']", out
+    started = subprocess.run([sys.executable, "-c", "from runnerdeck import config, runners; cfg = config.load(); runners.keep_watch(cfg); "
                               "import time; time.sleep(1.5); print(runners.alive(cfg.watch)); runners.end(cfg.watch); "
                               "time.sleep(0.5); print(runners.alive(cfg.watch))"],
                              env=env, cwd=tmp, capture_output=True, text=True, timeout=60)

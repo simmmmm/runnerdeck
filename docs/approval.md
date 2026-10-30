@@ -10,6 +10,12 @@ label = deploy-request
 
 The setup asks `gh` for the workflows of your repositories and lets you choose from the list. Move with the arrow keys, choose with the space bar, and press Enter. If `gh` gives no list, you write the names.
 
+## What approval is, and what it is not
+
+Approval here is a request that you answer on the screen. The program starts the workflow when you say yes. It does not stop the workflow from starting by its own triggers, such as a push. It is an agreement, not a lock.
+
+For a real block, use the environments of GitHub with required reviewers. GitHub then holds the job until a reviewer approves it. Some plans offer this only for public repositories, so check yours. You can use both: GitHub blocks, and runnerdeck shows the request on your screen.
+
 ## Change it later
 
 Press `w` on the main screen. The list of workflows opens again, and the ones that wait for your yes are already chosen. Change them with the space bar and press Enter. The program changes only the `[approval]` section of the file. The rest stays as it is, comments too. The old file is kept as `config.ini.bak`. If you choose none, the section is taken out.

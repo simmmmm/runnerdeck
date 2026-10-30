@@ -162,19 +162,19 @@ def show(window, cfg, runners, queue, machine, pcs=()):
 
 
 def build(target):
-    """One file from the package: `python3 runner.pyz` opens it."""
+    """One file from the package: `python3 runnerdeck.pyz` opens it."""
     import zipapp
     package = os.path.dirname(os.path.abspath(__file__))
     with tempfile.TemporaryDirectory() as tmp:
-        shutil.copytree(package, os.path.join(tmp, "runner"), ignore=shutil.ignore_patterns("__pycache__"))
-        zipapp.create_archive(tmp, target, interpreter="/usr/bin/env python3", main="runner.app:main", compressed=True)
+        shutil.copytree(package, os.path.join(tmp, "runnerdeck"), ignore=shutil.ignore_patterns("__pycache__"))
+        zipapp.create_archive(tmp, target, interpreter="/usr/bin/env python3", main="runnerdeck.app:main", compressed=True)
 
 
 def install():
-    """This as ~/runner.pyz (built, if it is run from source), and `runner` in
+    """This as ~/runnerdeck.pyz (built, if it is run from source), and `runnerdeck` in
     the shell's rc to open it. Not in a login file: opening it at every login
     would start the runners with it."""
-    target = os.path.expanduser("~/runner.pyz")
+    target = os.path.expanduser("~/runnerdeck.pyz")
     here = os.path.abspath(sys.argv[0])
     if zipfile.is_zipfile(here):
         if here != target:
@@ -182,15 +182,15 @@ def install():
     else:
         build(target)
     if WINDOWS:
-        command = os.path.expanduser("~/runner.cmd")
+        command = os.path.expanduser("~/runnerdeck.cmd")
         with open(command, "w") as file:
-            file.write(f'@"{sys.executable}" "%~dp0runner.pyz" %*\r\n')
-        return f"{target} and {command} are made.\nPut {os.path.dirname(command)} on your PATH. Then type: runner"
+            file.write(f'@"{sys.executable}" "%~dp0runnerdeck.pyz" %*\r\n')
+        return f"{target} and {command} are made.\nPut {os.path.dirname(command)} on your PATH. Then type: runnerdeck"
     rc = os.path.expanduser("~/.zshrc" if os.path.basename(os.environ.get("SHELL", "")) == "zsh" else "~/.bashrc")
-    if "runner.pyz" not in read(rc):
+    if "runnerdeck.pyz" not in read(rc):
         with open(rc, "a") as file:
-            file.write(f"\n# runner: starts the runners and shows them\nalias runner='{sys.executable} ~/runner.pyz'\n")
-    return f"Open a new terminal window. Then type: runner\n(Or run: source {rc})\nThe program is in {target}."
+            file.write(f"\n# runnerdeck: starts the runners and shows them\nalias runnerdeck='{sys.executable} ~/runnerdeck.pyz'\n")
+    return f"Open a new terminal window. Then type: runnerdeck\n(Or run: source {rc})\nThe program is in {target}."
 
 
 def init():
@@ -237,7 +237,7 @@ def main(args=None):
         return
     if "--build" in args:
         at = args.index("--build") + 1
-        build(args[at] if at < len(args) else "runner.pyz")
+        build(args[at] if at < len(args) else "runnerdeck.pyz")
         return
     cfg, missing = None, None
     if "--setup" not in args:

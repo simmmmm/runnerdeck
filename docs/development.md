@@ -3,7 +3,7 @@
 ## Run the tests
 
 ```
-python3 tests/test_runner.py
+python3 tests/test_runnerdeck.py
 ```
 
 The tests need no network and no packages. They use stand-in `gh` and `ssh` programs.
@@ -13,25 +13,25 @@ The tests need no network and no packages. They use stand-in `gh` and `ssh` prog
 ## Make one file
 
 ```
-python3 -m runner --build runner.pyz
-python3 runner.pyz
+python3 -m runnerdeck --build runnerdeck.pyz
+python3 runnerdeck.pyz
 ```
 
-`--install` makes `~/runner.pyz` and adds a `runner` command to your shell.
+`--install` makes `~/runnerdeck.pyz` and adds a `runnerdeck` command to your shell.
 
 ## Modules
 
 | Module | Job |
 |---|---|
-| `runner/config.py` | Reads and checks the config file. Makes the `Config` object. |
-| `runner/system.py` | Differences between macOS, Linux, and Windows. |
-| `runner/runners.py` | The runners on this machine. |
-| `runner/github.py` | Runs and requests, through `gh`. |
-| `runner/machines.py` | CPU, GPU, memory, and temperature. |
-| `runner/terminal.py` | Keys and drawing. |
-| `runner/boxes.py` | The boxes of the screen. |
-| `runner/setup.py` | The questions of the first start. |
-| `runner/app.py` | The loop and the commands. |
+| `runnerdeck/config.py` | Reads and checks the config file. Makes the `Config` object. |
+| `runnerdeck/system.py` | Differences between macOS, Linux, and Windows. |
+| `runnerdeck/runners.py` | The runners on this machine. |
+| `runnerdeck/github.py` | Runs and requests, through `gh`. |
+| `runnerdeck/machines.py` | CPU, GPU, memory, and temperature. |
+| `runnerdeck/terminal.py` | Keys and drawing. |
+| `runnerdeck/boxes.py` | The boxes of the screen. |
+| `runnerdeck/setup.py` | The questions of the first start. |
+| `runnerdeck/app.py` | The loop and the commands. |
 
 The `Config` object is passed to the functions that need it. There are no settings in module variables.
 

@@ -139,4 +139,4 @@ def own_command(*args):
     package is in goes on PYTHONPATH."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     path = os.pathsep.join(part for part in (root, os.environ.get("PYTHONPATH")) if part)
-    return [sys.executable, "-m", "runner", *args], dict(os.environ, PYTHONPATH=path)
+    return [sys.executable, "-m", "runnerdeck", *args], dict(os.environ, PYTHONPATH=path)

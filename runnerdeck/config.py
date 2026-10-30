@@ -77,7 +77,14 @@ class Config:
 
 
 def default_path():
-    return os.path.expanduser(os.environ.get("RUNNER_CONFIG", "~/.config/runner/config.ini"))
+    """The config file: RUNNERDECK_CONFIG, else ~/.config/runnerdeck/config.ini. The program was
+    called runner first: a file or a variable under that name is still found, and used when
+    there is none under the new one."""
+    chosen = os.environ.get("RUNNERDECK_CONFIG") or os.environ.get("RUNNER_CONFIG")
+    if chosen:
+        return os.path.expanduser(chosen)
+    new, old = (os.path.expanduser(f"~/.config/{name}/config.ini") for name in ("runnerdeck", "runner"))
+    return old if os.path.exists(old) and not os.path.exists(new) else new
 
 
 def configure(config):
@@ -94,7 +101,7 @@ def configure(config):
     for repo in cfg.repos:
         if not SLUG.match(repo):
             raise ConfigError(f"not a repository, owner/name: {repo}")
-    cfg.home = os.path.expanduser(os.environ.get("RUNNER_HOME", "~"))
+    cfg.home = os.path.expanduser(os.environ.get("RUNNERDECK_HOME") or os.environ.get("RUNNER_HOME") or "~")
     if config.has_section("local"):
         local = config["local"]
         cfg.local = {"name": local.get("name", "box"), "dir": os.path.expanduser(local.get("dir", "~/actions-runner")),
@@ -132,7 +139,7 @@ def load(path=None):
     path = path or default_path()
     config = configparser.ConfigParser()
     if not config.read(path):
-        raise NoConfig(f"no config at {path}. Start the program in a terminal to set it up, or run: python3 -m runner --init")
+        raise NoConfig(f"no config at {path}. Start the program in a terminal to set it up, or run: python3 -m runnerdeck --init")
     return configure(config)
 
 

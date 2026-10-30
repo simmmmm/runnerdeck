@@ -1,9 +1,9 @@
-# runner
+# runnerdeck
 
 **One screen in your terminal for your GitHub Actions runners, your machines, and your workflow runs.**
 
 ```
- ◐ runner                                                                    awake
+ ◐ runnerdeck                                                                    awake
 ╭─ desk ───────────────────────────────────────────────────── here · load 1.4 · 16 threads ─╮
 │ CPU  ▁▁▂▂▃▃▅▅▆▇██▇▆▅▃▂▂▁▁▁▂▃▅▇██▇▅▃▂▁    74 %   Heat     CPU 71 °C  GPU 58 °C        │
 │ GPU  ▁▁▁▁▁▁▂▂▃▃▃▃▃▂▂▁▁▁▁▁▁▁▁▂▃▃▃▃▂▂▁▁▁    37 %   Card     142 W  VRAM 4.0 / 16 GB      │
@@ -24,7 +24,7 @@
 - It shows the last workflow runs of your repositories. You can cancel, repeat, or open a run.
 - The first time, it asks a few questions on the screen and writes the config file for you. It finds runners that are set up already.
 - You can add a new runner. You only paste the token.
-- You can keep a workflow behind your approval, and change which ones later.
+- You can keep a workflow behind your approval, and change which ones later. Approval is a request that you answer on the screen. It does not lock the workflow: see [Approval](docs/approval.md).
 
 ## What you need
 
@@ -35,13 +35,13 @@
 
 ## Start
 
-1. Get the code: `git clone https://github.com/simmmmm/runner && cd runner`
-2. Start the program: `python3 -m runner` (on Windows: `py -m runner`)
+1. Get the code: `git clone https://github.com/simmmmm/runnerdeck && cd runnerdeck`
+2. Start the program: `python3 -m runnerdeck` (on Windows: `py -m runnerdeck`)
 3. Answer the questions on the screen.
 
-The first time, the program asks a few questions. It writes the config file for you. It can also make a `runner` command and set up the runners on this machine. When it is done, open a new terminal window and type `runner`.
+The first time, the program asks a few questions. It writes the config file for you. It can also make a `runnerdeck` command and set up the runners on this machine. When it is done, open a new terminal window and type `runnerdeck`.
 
-To ask the questions again, use `--setup`. The config file is plain text. It lists all the options at its foot, as comments. Read it with `cat ~/.config/runner/config.ini`, or find it in your file manager. See also [Config](docs/config.md). To see the screen one time, as text, and start nothing, use `--status`.
+To ask the questions again, use `--setup`. The config file is plain text. It lists all the options at its foot, as comments. Read it with `cat ~/.config/runnerdeck/config.ini`, or find it in your file manager. See also [Config](docs/config.md). To see the screen one time, as text, and start nothing, use `--status`.
 
 ## Example
 

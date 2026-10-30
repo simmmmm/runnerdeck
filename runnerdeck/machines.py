@@ -276,7 +276,7 @@ def ask_pc(host, service=""):
     if host is not None:
         # Windows' ssh does not keep a connection open between calls.
         keep = [] if WINDOWS else ["-o", "ControlMaster=auto", "-o", "ControlPersist=120",
-                                   "-o", "ControlPath=" + os.path.expanduser("~/.ssh/runner-%C")]
+                                   "-o", "ControlPath=" + os.path.expanduser("~/.ssh/runnerdeck-%C")]
         command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", *keep, "--", host, *command]
     got = subprocess.run(command, input=PC_ASKS, capture_output=True, text=True, timeout=20)
     return parse_pc(got.stdout) if got.returncode == 0 and got.stdout.strip() else None

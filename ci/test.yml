@@ -1,4 +1,4 @@
-# The tests on the three systems runner runs on, and on the oldest Python it
+# The tests on the three systems runnerdeck runs on, and on the oldest Python it
 # promises (3.9, the one macOS ships). Windows has nobody to try it by hand:
 # this is where it is tried.
 name: Test
@@ -22,4 +22,4 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python tests/test_runner.py
+      - run: python tests/test_runnerdeck.py

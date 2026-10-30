@@ -29,7 +29,7 @@ STEPS = {
     "approval": ("yesno", "Approval"),
     "workflows": ("text", "Workflows"),
     "label": ("text", "Label"),
-    "command": ("yesno", "The runner command"),
+    "command": ("yesno", "The runnerdeck command"),
     "review": ("info", "Check the config"),
     "save": ("info", "Saved"),
     "work": ("info", "Setting up the runners"),
@@ -479,7 +479,7 @@ class Wizard:
             try:
                 self.installed = self.install()
             except OSError as err:
-                self.problem = f"The runner command was not made: {err}"
+                self.problem = f"The runnerdeck command was not made: {err}"
         self.go("work" if self.answers["count"] else "done")
 
     def work(self):
@@ -563,14 +563,14 @@ class Wizard:
                       + (a["workflows"] or ["Deploy"])[0] + ": main a0d3a70"],
             "save": (["Saved.", "", "These workflows wait for your yes: " + (", ".join(a["workflows"]) or "none"),
                      f"The old file is kept as {os.path.basename(self.path)}.bak."] if self.saved else ["The file was not changed."]),
-            "command": ["Do you want a `runner` command in your terminal?",
-                        "The program copies itself to your home folder (runner.pyz) and adds one line to your shell file."],
+            "command": ["Do you want a `runnerdeck` command in your terminal?",
+                        "The program copies itself to your home folder (runnerdeck.pyz) and adds one line to your shell file."],
             "review": ["This is the config file:", ""] + config_text(a).split("\n# ---- ")[0].splitlines()
                       + ["", "At the foot it lists all other options, as comments.", f"Enter writes it to {self.path}"]
                       + ([f"The old file is kept as {os.path.basename(self.path)}.bak"] if os.path.exists(self.path) else []),
             "work": [] + [item for item in self.progress] + ([] if self.working else ["", "Press Enter."]),
             "done": ["Setup is done.", ""] + ([("good", item) for item in (self.installed or "").splitlines()] if self.installed
-                                               else ["Start the program again with: python3 -m runner"])
+                                               else ["Start the program again with: python3 -m runnerdeck"])
                     + ([("bad", self.problem)] if self.problem else [])
                     + ["", f"Your config file is {self.path}", "Read it with: cat " + self.path, self.open_tip()],
         }[step]
@@ -633,7 +633,7 @@ def draw(canvas, view):
         rows += [("plain", "")] + [("bad" if view["bad"] else "warm", piece) for piece in textwrap.wrap(view["note"], inner)]
     height = min(canvas.height, len(rows) + 5)
     x, y = (canvas.width - width) // 2, max(0, (canvas.height - height) // 2)
-    frame(canvas, y, x, height, width, "runner · setup", view["title"])
+    frame(canvas, y, x, height, width, "runnerdeck · setup", view["title"])
     for at, (style, text) in enumerate(rows[:height - 4], start=y + 2):
         canvas.put(at, x + 3, text, style)
     canvas.put(y + height - 2, x + 3, view["hint"][:inner], "label")
