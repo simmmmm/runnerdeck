@@ -2,6 +2,7 @@
 """python3 tests/test_runner.py — config, requests, the machine's answer, the screen, one file."""
 import configparser
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -188,6 +189,17 @@ else:
 
 
     assert "creationflags" not in system.apart() and system.exists(os.getpid()) and not system.exists(2**22 + 12345)
+
+# --- the config examples in the documents are valid, so they cannot drift
+import glob
+blocks = 0
+for path in glob.glob(os.path.join(ROOT, "README.md")) + glob.glob(os.path.join(ROOT, "docs", "*.md")):
+    for block in re.findall(r"```ini\n(.*?)```", open(path, encoding="utf-8").read(), re.S):
+        text = block if "[deck]" in block else "[deck]\nrepos = a/b\n" + block
+        text = text.replace("[local]\n", "[local]\n") if "[local]" not in text else text
+        configured(text)
+        blocks += 1
+assert blocks >= 6, blocks  # the examples in the README and in docs/config.md
 
 # --- one file from the package: it runs, and what it starts again (the watcher) finds itself
 with tempfile.TemporaryDirectory() as tmp:
