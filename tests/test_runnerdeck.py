@@ -744,7 +744,10 @@ if not system.WINDOWS:
         send("\r", "Which label")
         send("\r", "Saved.")
         send("\r", "no runs")                              # back on the main screen
-        os.write(fd, b"q")
+        send("\x1b", "Leave runnerdeck")                   # esc asks first: it is easy to press by mistake
+        send("n", "no runs")                               # stay: the screen is back
+        send("\x1b", "Leave runnerdeck")
+        os.write(fd, b"y")                                 # leave
         _, status = os.waitpid(pid, 0)
         assert os.WEXITSTATUS(status) == 0
         assert open(config_file).read() == ("# mine\n[deck]\nrepos = owner/name\n\n[approval]\nworkflows = CI, TestFlight\n"

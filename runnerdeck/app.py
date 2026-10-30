@@ -22,6 +22,12 @@ def show(window, cfg, runners, queue, machine, pcs=()):
     # By its row, not its place: the list moves as runs come in.
     shown, note, picked, dialog = 0, "", None, None
 
+    leaving = False
+
+    def leave():
+        nonlocal leaving
+        leaving = True
+
     def ask(title, words, yes, no, then):
         return {"title": title, "words": words, "yes": yes, "no": no, "then": then, "focus": False}
 
@@ -92,13 +98,18 @@ def show(window, cfg, runners, queue, machine, pcs=()):
             elif key == ord("y") or (key in ENTER and dialog["focus"]):
                 dialog["then"]()
                 dialog = None
+                if leaving:
+                    return
             elif key in (ord("n"), ord("q"), 27) or key in ENTER:
                 dialog = None
             continue
         if key == 27 and picked is not None:
             picked, note = None, ""
             continue
-        if key in (ord("q"), 27):
+        if key == 27:
+            dialog = ask("Leave", "Leave runnerdeck? The runners keep running.", "Leave", "Stay", leave)
+            continue
+        if key == ord("q"):
             return
         requests, runs = queue.requests, queue.runs or []
         items = [*requests, *runs]
@@ -210,7 +221,10 @@ def terminal(work):
         with ConsoleTerminal() as console:
             return work(console)
     if curses is None:
-        sys.exit("runner: this Python has no curses")
+        sys.exit("runnerdeck: this Python has no curses")
+    # curses waits a second after an Esc to see whether an arrow key follows: that is the lag.
+    # A key sends its whole sequence at once, so a few hundredths are enough.
+    os.environ.setdefault("ESCDELAY", "25")
     return curses.wrapper(lambda window: work(CursesTerminal(window)))
 
 
@@ -246,14 +260,14 @@ def main(args=None):
         except NoConfig as err:
             missing = err
         except (ConfigError, ValueError) as err:
-            sys.exit(f"runner: {err}")
+            sys.exit(f"runnerdeck: {err}")
     if cfg is None:
         # The first start asks its questions, if there is somebody to ask.
         if "--status" in args or not (sys.stdin.isatty() and sys.stdout.isatty()):
-            sys.exit(f"runner: {missing or 'setup needs a terminal'}")
+            sys.exit(f"runnerdeck: {missing or 'setup needs a terminal'}")
         cfg = first_start()
         if cfg is None:
-            sys.exit("runner: setup stopped. Nothing was written.")
+            sys.exit("runnerdeck: setup stopped. Nothing was written.")
     runners = [Runner(cfg, n) for n in range(1, runner_count(cfg) + 1)] if cfg.local else []
     if "--install" in args:
         print(install())
