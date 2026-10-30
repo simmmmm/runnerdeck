@@ -34,11 +34,12 @@
 ## Start
 
 1. Get the code: `git clone https://github.com/simmmmm/runner && cd runner`
-2. Make the config file: `python3 -m runner --init`
-3. Open `~/.config/runner/config.ini`. Change the repository name.
-4. Start: `python3 -m runner`
+2. Start the program: `python3 -m runner` (on Windows: `py -m runner`)
+3. Answer the questions on the screen.
 
-To see the screen one time, as text, and start nothing: `python3 -m runner --status`.
+The first time, the program asks a few questions. It writes the config file for you. It can also make a `runner` command and set up the runners on this machine. When it is done, open a new terminal window and type `runner`.
+
+To ask the questions again, use `--setup`. To edit the file by hand, see [Config](docs/config.md). To see the screen one time, as text, and start nothing, use `--status`.
 
 ## Example
 

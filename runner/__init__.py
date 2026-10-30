@@ -1,10 +1,13 @@
 """runner: self-hosted GitHub Actions runners, the machines they run on and
 the runs they work on, on one btop-style screen in the terminal.
 
-    runner --init      write an example config, then edit it
-    runner                   start the local runners that are not running, then the screen
-    runner --status    the screen once, as text
-    runner --install   copy this to ~/runner.py, and `runner` in your shell
+    runner             start the local runners that are not running, then the screen.
+                       The first time, questions on the screen make the config first.
+    runner --setup     ask the questions again (the old config is kept as config.ini.bak)
+    runner --init      write an example config file, to edit by hand
+    runner --status    the screen once, as text; starts nothing
+    runner --install   copy this to ~/runner.pyz, and `runner` in your shell
+    runner --build F   make one file F (runner.pyz) of the package
 
 What it shows: this machine (CPU, GPU, memory, power, heat; macOS or Linux),
 other machines over ssh, the runners on this machine (what each is doing and how

@@ -7,6 +7,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -200,6 +201,208 @@ for path in glob.glob(os.path.join(ROOT, "README.md")) + glob.glob(os.path.join(
         configured(text)
         blocks += 1
 assert blocks >= 6, blocks  # the examples in the README and in docs/config.md
+
+# --- the first start: the questions, fed keys, with stand-ins for gh, ssh and the downloads
+from runner import setup as setupmod
+
+
+class Checks:
+    def __init__(self, gh=(True, True), seen=None, ssh=True):
+        self.gh_state, self.seen, self.ssh_ok = gh, seen or {}, ssh
+
+    def gh(self):
+        return self.gh_state
+
+    def repo(self, repo):
+        return self.seen.get(repo, True)
+
+    def ssh(self, host):
+        return self.ssh_ok
+
+
+def wipe_and_type(wizard, text):
+    for _ in range(len(wizard.field)):
+        wizard.feed(127)
+    for letter in text:
+        wizard.feed(ord(letter))
+
+
+def answer(wizard, text=None):
+    if text is not None:
+        wipe_and_type(wizard, text)
+    wizard.feed(13)
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    made, installed = [], []
+    path = os.path.join(tmp, "conf", "config.ini")
+
+    def wizard_for(**kinds):
+        return setupmod.Wizard(Checks(**kinds), install=lambda: installed.append(1) or "Open a new terminal.\nType: runner",
+                               make=lambda cfg, n, token: made.append((cfg.local["name"], n, token)), path=path)
+
+    # the whole way, with every question answered
+    w = wizard_for()
+    assert w.step == "welcome" and w.gh == (True, True)
+    answer(w)
+    answer(w, "a/b, c/d")
+    answer(w, "2")
+    answer(w, "box")
+    answer(w)                                   # the folder: what is offered
+    answer(w)                                   # the repository of the runners: the first
+    answer(w, "ABCDEFGH12345")
+    w.feed(ord("y"))                            # another machine
+    answer(w, "me@my-pc")
+    answer(w, "x.service")
+    w.feed(ord("y"))                            # approval
+    answer(w, "Deploy")
+    answer(w)                                   # the label: deploy-request
+    w.feed(ord("y"))                            # the command
+    assert w.step == "review" and "[host my-pc]" in "\n".join(map(str, w.text()))
+    answer(w)
+    assert w.step == "work"
+    for _ in range(200):
+        if not w.working:
+            break
+        time.sleep(0.05)
+    assert made == [("box", 1, "ABCDEFGH12345"), ("box", 2, "ABCDEFGH12345")], made
+    answer(w)
+    assert w.step == "done" and installed == [1]
+    answer(w)
+    assert w.finished and not w.cancelled and w.cfg.repos == ["a/b", "c/d"]
+    written = open(path).read()
+    assert written == ("[deck]\nrepos = a/b, c/d\n\n[local]\nname = box\ndir = ~/actions-runner\ncount = 2\nrepo = a/b\n\n"
+                       "[host my-pc]\nssh = me@my-pc\nservice = x.service\n\n[approval]\nworkflows = Deploy\nlabel = deploy-request\n"), written
+    assert "ABCDEFGH12345" not in written and configmod.load(path).local["count"] == 2   # the token is not kept
+
+    # what is offered goes at the first key typed; backspace edits it instead
+    w = wizard_for()
+    answer(w); answer(w, "a/b")
+    assert w.step == "count" and w.field == "0" and w.view()["fresh"]
+    w.feed(ord("2"))
+    assert w.field == "2" and not w.view()["fresh"]
+    w.feed(127)
+    assert w.field == ""
+    answer(w, "0")
+    w = wizard_for()
+    answer(w); answer(w, "a/b"); answer(w, "1")
+    assert w.step == "name" and w.field
+    shown = w.field
+    w.feed(127)
+    assert w.field == shown[:-1]
+
+    # the shortest way: one repository, nothing else; and the old file is kept
+    made.clear()
+    w = wizard_for()
+    answer(w); answer(w, "a/b"); answer(w, "0"); w.feed(ord("n")); w.feed(ord("n")); w.feed(ord("n"))
+    assert w.step == "review"
+    answer(w)
+    assert w.step == "done" and made == [] and open(path).read() == "[deck]\nrepos = a/b\n"
+    assert open(path + ".bak").read() == written
+    answer(w)
+    assert w.finished
+
+    # wrong answers are said and kept; escape goes back with the answer still there
+    w = wizard_for(seen={"x/y": False})
+    answer(w)
+    for bad, word in (("", "at least one"), ("xyz", "owner/name"), ("--repo=a/b", "owner/name"), ("x/y", "cannot see")):
+        answer(w, bad)
+        assert w.step == "repos" and w.bad and word in w.note, (bad, w.note)
+    answer(w, "a/b")
+    assert w.step == "count"
+    for bad in ("x", "10", "-1", "1 "):
+        if bad.strip() == "1":
+            continue
+        answer(w, bad)
+        assert w.step == "count" and w.bad, bad
+    answer(w, "1")
+    answer(w, "has space")
+    assert w.step == "name" and w.bad
+    w.feed(27)                                  # back to the count
+    assert w.step == "count" and w.field == "1"
+    w.feed(27); w.feed(27)                      # back to the welcome
+    assert w.step == "welcome"
+    w.feed(27)
+    assert w.finished and w.cancelled           # escape at the start stops it, and nothing was written for it
+    assert open(path).read() == "[deck]\nrepos = a/b\n"
+
+    # a warning is said once; the same answer again keeps it
+    w = wizard_for(ssh=False)
+    answer(w); answer(w, "a/b"); answer(w, "0"); w.feed(ord("y")); answer(w, "me@pc")
+    assert w.step == "ssh" and not w.bad and "without a password" in w.note
+    answer(w)
+    assert w.step == "service"
+    w = wizard_for(gh=(False, False), seen={"a/b": None})
+    assert w.gh == (False, False) and any("not installed" in str(line) for line in w.text())
+    answer(w); answer(w, "a/b")
+    assert w.step == "repos" and "not checked" in w.note
+    answer(w)
+    assert w.step == "count"
+
+    # a token that is not one is refused; none at all asks gh later
+    w = wizard_for()
+    answer(w); answer(w, "a/b"); answer(w, "1"); answer(w); answer(w)
+    assert w.step == "token"
+    answer(w, "bad token!")
+    assert w.step == "token" and w.bad
+    answer(w, "")
+    assert w.step == "other"
+
+# --- the first start on a real terminal screen, with keys typed into it
+if not system.WINDOWS:
+    import pty, select, fcntl, termios, struct
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, body in (("gh", '#!/bin/sh\ncase "$1 $2" in "auth status") exit 0;; "api repos/owner/name") echo owner/name; exit 0;; esac\nexit 1\n'),):
+            with open(os.path.join(tmp, name), "w") as file:
+                file.write(body)
+            os.chmod(os.path.join(tmp, name), 0o755)
+        env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"], HOME=tmp, SHELL="/bin/bash", TERM="xterm-256color",
+                   RUNNER_CONFIG=os.path.join(tmp, "c", "config.ini"), RUNNER_HOME=tmp, PYTHONPATH=ROOT)
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.chdir(tmp)
+            os.execvpe(sys.executable, [sys.executable, "-m", "runner"], env)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
+        seen = ""
+
+        def until(word, seconds=20):
+            global seen
+            end = time.time() + seconds
+            while time.time() < end:
+                if word in seen:
+                    return
+                ready, _, _ = select.select([fd], [], [], 0.2)
+                if ready:
+                    try:
+                        seen += os.read(fd, 65536).decode("utf-8", "replace")
+                    except OSError:
+                        break
+            raise AssertionError(f"never saw {word!r}; the end was: {seen[-400:]!r}")
+
+        def send(text, then):
+            global seen
+            seen = ""
+            os.write(fd, text.encode())
+            until(then)
+
+        until("Welcome")
+        send("\r", "Which repository")
+        send("owner/name\r", "How many runners")
+        send("0\r", "another machine")
+        send("n", "approval")
+        send("n", "runner` command")
+        send("y", "This is the config file")
+        send("\r", "Setup is done")
+        send("\r", "gh did not answer")        # the main screen, saying why there are no runs
+        os.write(fd, b"q")
+        _, status = os.waitpid(pid, 0)
+        assert os.WEXITSTATUS(status) == 0, status
+        assert open(os.path.join(tmp, "c", "config.ini")).read() == "[deck]\nrepos = owner/name\n"
+        assert os.path.getsize(os.path.join(tmp, "runner.pyz")) > 1000
+        assert "alias runner=" in open(os.path.join(tmp, ".bashrc")).read()
+        # And the program started again finds its config and does not ask.
+        out = subprocess.run([sys.executable, "-m", "runner", "--status"], env=env, cwd=tmp, capture_output=True, text=True, timeout=60)
+        assert out.returncode == 0 and "Welcome" not in out.stdout and "◐ runner" in out.stdout, out.stderr
 
 # --- one file from the package: it runs, and what it starts again (the watcher) finds itself
 with tempfile.TemporaryDirectory() as tmp:

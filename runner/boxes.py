@@ -278,6 +278,10 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
     if queue.requests:
         y = requests_box(canvas, y, width, queue.requests, picked, queue.working)
     room = height - 1 - y
+    if not queue.runs and queue.problem and room >= 3:
+        frame(canvas, y, 0, 3, width, "github", "no runs")
+        canvas.put(y + 1, 2, queue.problem[:width - 4], "warm")
+        y += 3
     if queue.runs and room >= 5:
         y = github_box(canvas, y, width, queue.runs[:max(1, min(len(queue.runs), room - 7))], cfg.repos, picked, queue.working)
     if runners and height - 1 - y >= 3:

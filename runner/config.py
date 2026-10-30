@@ -36,6 +36,10 @@ class ConfigError(Exception):
     pass
 
 
+class NoConfig(ConfigError):
+    """There is no config file yet: the first start."""
+
+
 class Config:
     """The repositories, where the local runners live, the other machines, and
     the workflows that wait for a person. Made by `configure`, handed to what
@@ -110,5 +114,5 @@ def load(path=None):
     path = path or default_path()
     config = configparser.ConfigParser()
     if not config.read(path):
-        raise ConfigError(f"no config at {path}: runner --init writes an example")
+        raise NoConfig(f"no config at {path}. Start the program in a terminal to set it up, or run: python3 -m runner --init")
     return configure(config)

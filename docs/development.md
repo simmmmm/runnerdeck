@@ -30,6 +30,7 @@ python3 runner.pyz
 | `runner/machines.py` | CPU, GPU, memory, and temperature. |
 | `runner/terminal.py` | Keys and drawing. |
 | `runner/boxes.py` | The boxes of the screen. |
+| `runner/setup.py` | The questions of the first start. |
 | `runner/app.py` | The loop and the commands. |
 
 The `Config` object is passed to the functions that need it. There are no settings in module variables.

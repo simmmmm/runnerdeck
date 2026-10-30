@@ -8,12 +8,13 @@ import threading
 import zipfile
 from .util import read
 from .system import WINDOWS
-from .config import ConfigError, EXAMPLE, default_path, load
+from .config import ConfigError, EXAMPLE, NoConfig, default_path, load
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
 from .github import Queue, act_on_run, approve, close, row_of
 from .machines import build_machines
 from .terminal import ConsoleTerminal, CursesTerminal, ENTER, Grid, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
 from .boxes import paint
+from .setup import Wizard, run as run_setup
 
 
 def show(window, cfg, runners, queue, machine, pcs=()):
@@ -173,13 +174,12 @@ def install():
         command = os.path.expanduser("~/runner.cmd")
         with open(command, "w") as file:
             file.write(f'@"{sys.executable}" "%~dp0runner.pyz" %*\r\n')
-        print(f"{target} and {command}: put {os.path.dirname(command)} on the PATH and `runner` opens it.")
-        return
+        return f"{target} and {command} are made.\nPut {os.path.dirname(command)} on your PATH. Then type: runner"
     rc = os.path.expanduser("~/.zshrc" if os.path.basename(os.environ.get("SHELL", "")) == "zsh" else "~/.bashrc")
     if "runner.pyz" not in read(rc):
         with open(rc, "a") as file:
             file.write(f"\n# runner: starts the runners and shows them\nalias runner='{sys.executable} ~/runner.pyz'\n")
-    print(f"{target}; `runner` opens it, in a new shell or after `source {rc}`.")
+    return f"Open a new terminal window. Then type: runner\n(Or run: source {rc})\nThe program is in {target}."
 
 
 def init():
@@ -190,17 +190,27 @@ def init():
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as file:
         file.write(EXAMPLE)
-    print(f"{path} written: edit it, then run runner again.")
+    print(f"{path} written: edit it, then start the program again.")
+
+
+def terminal(work):
+    """Runs work(terminal) on the screen, and leaves the screen as it was."""
+    if WINDOWS:
+        with ConsoleTerminal() as console:
+            return work(console)
+    if curses is None:
+        sys.exit("runner: this Python has no curses")
+    return curses.wrapper(lambda window: work(CursesTerminal(window)))
 
 
 def screen(*args):
-    if WINDOWS:
-        with ConsoleTerminal() as terminal:
-            show(terminal, *args)
-    elif curses is None:
-        sys.exit("runner: this Python has no curses")
-    else:
-        curses.wrapper(lambda window: show(CursesTerminal(window), *args))
+    terminal(lambda console: show(console, *args))
+
+
+def first_start():
+    """The questions, on the screen. The config they make, or None."""
+    wizard = Wizard(install=install)
+    return terminal(lambda console: run_setup(console, wizard))
 
 
 def main(args=None):
@@ -218,13 +228,24 @@ def main(args=None):
         at = args.index("--build") + 1
         build(args[at] if at < len(args) else "runner.pyz")
         return
-    try:
-        cfg = load()
-    except (ConfigError, ValueError) as err:
-        sys.exit(f"runner: {err}")
+    cfg, missing = None, None
+    if "--setup" not in args:
+        try:
+            cfg = load()
+        except NoConfig as err:
+            missing = err
+        except (ConfigError, ValueError) as err:
+            sys.exit(f"runner: {err}")
+    if cfg is None:
+        # The first start asks its questions, if there is somebody to ask.
+        if "--status" in args or not (sys.stdin.isatty() and sys.stdout.isatty()):
+            sys.exit(f"runner: {missing or 'setup needs a terminal'}")
+        cfg = first_start()
+        if cfg is None:
+            sys.exit("runner: setup stopped. Nothing was written.")
     runners = [Runner(cfg, n) for n in range(1, runner_count(cfg) + 1)] if cfg.local else []
     if "--install" in args:
-        install()
+        print(install())
         return
     if "--watch" in args:
         watch(cfg, runners)

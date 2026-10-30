@@ -90,7 +90,10 @@ class Queue:
         self.working = {}
         self.over = set()
         self.said = ""
+        # Why there are no runs, when there are none: shown instead of a silent gap.
+        self.problem = ""
         if not shutil.which("gh") or not self.cfg.repos:
+            self.problem = "gh is not installed: get it from https://cli.github.com"
             return
         if once:
             self.fetch()
@@ -117,7 +120,7 @@ class Queue:
 
     def fetch(self):
         self.fetch_requests()
-        runs, told = [], False
+        runs, told, why = [], False, ""
         for repo in self.cfg.repos:
             got = subprocess.run(["gh", "run", "list", "--repo", repo, "--limit", "20", "--json",
                                   "databaseId,workflowName,headBranch,headSha,status,conclusion,createdAt,startedAt,updatedAt"],
@@ -129,6 +132,10 @@ class Queue:
             if listed is not None:
                 told = True
                 runs += [dict(run, repo=repo) for run in listed]
+            elif not why:
+                lines = [line.strip() for line in (got.stderr or "").splitlines() if line.strip()]
+                why = f"{repo}: {lines[0]}" if lines else f"{repo}: gh did not answer"
+        self.problem = "" if told else why
         if not told:
             return
         runs.sort(key=lambda run: run.get("createdAt", ""), reverse=True)
