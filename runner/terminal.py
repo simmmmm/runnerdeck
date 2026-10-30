@@ -61,7 +61,9 @@ class CursesTerminal:
     def size(self):
         return self.window.getmaxyx()
 
-    def key(self):
+    def key(self, wait=1.0):
+        """A key within `wait` seconds, or -1."""
+        self.window.timeout(int(wait * 1000))
         return self.window.getch()
 
     def leave(self):
@@ -103,9 +105,9 @@ class ConsoleTerminal:
         columns, lines = shutil.get_terminal_size()
         return lines, columns
 
-    def key(self):
-        """A key within a second, or -1; a changed size is a key too."""
-        end = time.time() + 1
+    def key(self, wait=1.0):
+        """A key within `wait` seconds, or -1; a changed size is a key too."""
+        end = time.time() + wait
         while time.time() < end:
             if msvcrt.kbhit():
                 character = msvcrt.getwch()

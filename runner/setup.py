@@ -9,6 +9,7 @@ import subprocess
 import sys
 import textwrap
 import threading
+import time
 from .config import ConfigError, HOST, REFERENCE, SLUG, WORD, configure, default_path, set_approval
 from .runners import Runner, TOKEN, find_runners, gh_token, plan_of, set_up
 from .terminal import K_BACKSPACE, K_DOWN, K_RESIZE, K_UP, Screen, colours, frame
@@ -43,30 +44,68 @@ class Checks:
         """(installed, signed in)"""
         if not shutil.which("gh"):
             return False, False
-        return True, subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=15).returncode == 0
+        try:
+            return True, subprocess.run(["gh", "auth", "status"], capture_output=True, timeout=15).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return True, False
 
     def repo(self, repo):
         """True if gh can see it, False if not, None if gh cannot say."""
         if not shutil.which("gh"):
             return None
-        got = subprocess.run(["gh", "api", f"repos/{repo}", "--jq", ".full_name"], capture_output=True, text=True, timeout=20)
+        try:
+            got = subprocess.run(["gh", "api", f"repos/{repo}", "--jq", ".full_name"], capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.SubprocessError):
+            return None
         return got.returncode == 0
 
     def workflows(self, repo):
         """The names of the workflows of a repository, as GitHub lists them; none if gh cannot say."""
         if not shutil.which("gh"):
             return []
-        got = subprocess.run(["gh", "workflow", "list", "--repo", repo, "--json", "name", "--limit", "100"],
-                             capture_output=True, text=True, timeout=20)
         try:
+            got = subprocess.run(["gh", "workflow", "list", "--repo", repo, "--json", "name", "--limit", "100"],
+                                 capture_output=True, text=True, timeout=20)
             return [item["name"] for item in json.loads(got.stdout)] if got.returncode == 0 else []
-        except (ValueError, KeyError, TypeError):
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+            return []
+
+    def labels(self, repo):
+        """The names of the labels of a repository; none if gh cannot say."""
+        if not shutil.which("gh"):
+            return []
+        try:
+            got = subprocess.run(["gh", "label", "list", "--repo", repo, "--json", "name", "--limit", "100"],
+                                 capture_output=True, text=True, timeout=20)
+            return [item["name"] for item in json.loads(got.stdout)] if got.returncode == 0 else []
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
             return []
 
     def ssh(self, host):
-        got = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "true"],
-                             capture_output=True, timeout=20)
-        return got.returncode == 0
+        """(connected, and if not, why in words a person can use)"""
+        try:
+            got = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, "true"],
+                                 capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.SubprocessError):
+            return False, explain_ssh("timed out", host)
+        return (True, "") if got.returncode == 0 else (False, explain_ssh(got.stderr, host))
+
+
+def explain_ssh(stderr, host):
+    """What ssh said, as a thing a person can do something about."""
+    said = (stderr or "").lower()
+    if "host key verification failed" in said or "no matching host key" in said:
+        return f"This computer does not know the PC yet. Run this once, answer yes, and try again: ssh {host}"
+    if "connection refused" in said:
+        return "The PC refuses the connection. Its SSH server is probably off. On Linux: sudo systemctl enable --now sshd"
+    if "permission denied" in said:
+        return f"The PC answers, but does not accept your key. Add it once: ssh-copy-id {host}"
+    if "could not resolve" in said or "name or service not known" in said:
+        return "That name is not known. Try the IP address."
+    if "timed out" in said or "no route to host" in said or "unreachable" in said:
+        return "No answer. Check the address, and that the PC is on and on the same network."
+    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
+    return lines[-1] if lines else "It did not connect."
 
 
 def make_runner(cfg, n, token):
@@ -101,9 +140,15 @@ class Wizard:
     """The questions as a machine that is fed keys and shows a view: the screen
     only draws it, so it can be tested without a terminal."""
 
+    SLOW = {"repos": "Asking GitHub…", "ssh": "Trying to connect…"}
+    SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
     def __init__(self, checks=None, install=None, make=None, path=None, finder=None, start="welcome", seed=None,
-                 typed=None, mode="setup"):
+                 typed=None, mode="setup", threaded=True):
         self.mode, self.saved = mode, False
+        # What is waited for: its words, whether the question is hidden meanwhile, which wait it is
+        # (an answer of an older one is dropped), and the answer when it has come.
+        self.busy, self.hide, self.generation, self.arrived, self.threaded = None, False, 0, None, threaded
         self.checks = checks or Checks()
         self.finder = finder or find_runners
         self.install = install
@@ -122,15 +167,15 @@ class Wizard:
         self.gh = (False, False)
         self.found, self.plan, self.left = [], None, []
         # The workflows to choose from, which of them, and how many names the program cannot use.
-        self.options, self.cursor, self.picked, self.skipped = [], 0, set(), 0
+        self.options, self.cursor, self.picked, self.skipped, self.labels = [], 0, set(), 0, []
         self.enter()
 
     @classmethod
-    def for_approval(cls, cfg, checks=None, path=None):
+    def for_approval(cls, cfg, checks=None, path=None, threaded=True):
         """Only the workflows that wait for a yes, chosen again from the list, for a
         config that is there already. What is set now is chosen to begin with."""
         typed = {"label": cfg.approval["label"]} if cfg.approval["label"] else None
-        return cls(checks, path=path, start="workflows", mode="approval", typed=typed,
+        return cls(checks, path=path, start="workflows", mode="approval", typed=typed, threaded=threaded,
                    seed={"repos": cfg.repos, "workflows": list(cfg.approval["workflows"])})
 
     # ---- moving between steps
@@ -138,20 +183,23 @@ class Wizard:
         self.field = self.typed.get(self.step) or self.default(self.step)
         # What is offered is replaced by the first key typed; backspace edits it.
         self.fresh = bool(self.field)
-        self.note, self.bad, self.kept = "", False, False
+        self.note, self.bad, self.kept, self.kept_parsed = "", False, False, None
         if self.step == "welcome":
-            self.gh = self.checks.gh()
-            # Runners that are there already are offered, not made again.
-            self.found = self.finder()
-            self.plan, self.left = plan_of(self.found)
-            if self.plan:
-                self.answers["name"], self.answers["dir"] = self.plan["name"], self.plan["dir"]
-            self.field = self.default("welcome")
+            def looked(result):
+                self.gh, self.found = result
+                # Runners that are there already are offered, not made again.
+                self.plan, self.left = plan_of(self.found)
+                if self.plan:
+                    self.answers["name"], self.answers["dir"] = self.plan["name"], self.plan["dir"]
+                self.field = self.default("welcome")
+            self.later("Looking at this computer…", lambda: (self.checks.gh(), self.finder()), looked, hide=True)
         elif self.step == "workflows":
-            self.options, self.skipped = self.lookup()
-            self.cursor = 0
-            chosen = self.answers["workflows"]
-            self.picked = {i for i, name in enumerate(self.options) if name in chosen}
+            def listed(result):
+                self.options, self.skipped, self.labels = result
+                self.cursor = 0
+                chosen = self.answers["workflows"]
+                self.picked = {i for i, name in enumerate(self.options) if name in chosen}
+            self.later("Asking GitHub for the workflows and labels…", self.lookup, listed, hide=True)
         elif self.step == "save":
             self.save()
         elif self.step == "work":
@@ -166,6 +214,34 @@ class Wizard:
         except (ConfigError, OSError) as err:
             self.note, self.bad = f"Not saved: {err}", True
 
+    def later(self, words, work, then, hide=False):
+        """work() off the screen's thread, with its words and a spinner on the screen meanwhile;
+        then(its answer) back on the screen's thread, from tick."""
+        if not self.threaded:
+            then(work())
+            return
+        self.generation += 1
+        mine = self.generation
+        self.busy, self.hide, self.note = words, hide, ""
+
+        def run():
+            try:
+                result = work()
+            except Exception as err:
+                result = err
+            self.arrived = (mine, then, result)
+        threading.Thread(target=run, daemon=True).start()
+
+    def tick(self):
+        """Takes the answer of what was waited for, if it has come. Called by the screen's loop."""
+        got, self.arrived = self.arrived, None
+        if got and got[0] == self.generation and self.busy:
+            self.busy, self.hide = None, False
+            if isinstance(got[2], Exception):
+                self.note, self.bad = f"Something went wrong: {got[2]}", True
+            else:
+                got[1](got[2])
+
     def remember(self):
         """What was typed stays when the step is left and come back to. What was only
         offered does not: it is offered again, from what is known by then."""
@@ -175,12 +251,31 @@ class Wizard:
             self.typed[self.step] = self.field
 
     def lookup(self):
-        """The workflows of the repositories, those whose names the program can use, and how many it cannot."""
-        names = []
+        """The workflows of the repositories, those whose names the program can use, how many it
+        cannot, and the labels that the repositories have."""
+        names, labels = [], []
         for repo in self.answers["repos"]:
             names += [name for name in self.checks.workflows(repo) if name not in names]
+            labels += [name for name in self.checks.labels(repo) if name not in labels]
         usable = [name for name in names if WORD.match(name)]
-        return usable, len(names) - len(usable)
+        return usable, len(names) - len(usable), labels
+
+    def default_label(self):
+        """The label to offer: one that is on GitHub already and fits a chosen workflow (a label
+        with its name in it, like testflight-request for TestFlight), else workflow-request."""
+        chosen = self.answers["workflows"]
+        if not chosen:
+            return ""
+        derived = chosen[0].lower().replace(" ", "-") + "-request"
+        if derived in self.labels:
+            return derived
+        for workflow in chosen:
+            words = workflow.lower().split()
+            for label in self.labels:
+                parts = re.split(r"[^a-z0-9]+", label.lower())
+                if "request" in parts and all(word in parts for word in words):
+                    return label
+        return derived
 
     def kind(self):
         """Choosing from a list, if gh gave one; else typing the names."""
@@ -204,6 +299,14 @@ class Wizard:
     # ---- keys
     def feed(self, key):
         if self.finished or key == K_RESIZE:
+            return
+        if self.busy:
+            # Only escape: stop waiting. A question that was hidden meanwhile goes back a step.
+            if key == 27:
+                self.generation += 1
+                hidden, self.busy, self.hide = self.hide, None, False
+                if hidden:
+                    self.back()
             return
         kind = self.kind()
         if key == 27:
@@ -239,12 +342,25 @@ class Wizard:
                 self.fresh = False
 
     def submit(self):
-        error, warning, parsed = self.check(self.step, self.field.strip())
+        step, value = self.step, self.field.strip()
+        if self.kept:
+            # A warning was said about this answer and it is the same: keep it, do not check again.
+            self.remember()
+            self.answers[step] = self.kept_parsed
+            return self.go(self.after())
+        words = self.SLOW.get(step)
+        if words:
+            self.later(words, lambda: self.check(step, value), self.judged)
+        else:
+            self.judged(self.check(step, value))
+
+    def judged(self, result):
+        error, warning, parsed = result
         if error:
             self.note, self.bad = error, True
             return
         if warning and not self.kept:
-            self.note, self.bad, self.kept = warning, False, True
+            self.note, self.bad, self.kept, self.kept_parsed = warning, False, True, parsed
             return
         self.remember()
         self.answers[self.step] = parsed
@@ -267,7 +383,7 @@ class Wizard:
         repos = list(dict.fromkeys(first + [item["repo"] for item in self.found if item["repo"]]))
         return {"repos": ", ".join(repos), "count": str(self.plan["count"]) if self.plan else "0", "name": a["name"], "dir": a["dir"], "local_repo": self.plan["repo"] if self.plan and self.plan["repo"] in a["repos"] else (a["repos"] or [""])[0],
                 "token": "", "other": "n", "ssh": "", "service": "", "approval": "n", "workflows": ", ".join(a["workflows"]),
-                "label": (a["workflows"][0].lower().replace(" ", "-") + "-request") if a["workflows"] else "",
+                "label": self.default_label(),
                 "command": "y"}.get(step, "")
 
     def missing_runners(self):
@@ -324,8 +440,10 @@ class Wizard:
             if not HOST.match(value):
                 return "Write it like user@host.", None, None
             a["host_name"] = re.sub(r"[^A-Za-z0-9_-]", "", value.split("@")[-1].split(".")[0]) or "pc"
-            if not self.checks.ssh(value):
-                return None, "The program cannot connect to it without a password yet. Press Enter again to keep it.", value
+            tried = self.checks.ssh(value)
+            connected, why = tried if isinstance(tried, tuple) else (tried, "It did not connect.")
+            if not connected:
+                return None, why + " Press Enter again to keep the address anyway.", value
         if step == "service" and value and not HOST.match(value):
             return "Write a service name, like actions-runner.service. Or leave it empty.", None, None
         if step == "workflows":
@@ -389,6 +507,8 @@ class Wizard:
     def text(self):
         a, step = self.answers, self.step
         ok, signed = self.gh
+        if step == "welcome" and self.busy:
+            return []
         if step == "welcome":
             lines = ["This asks a few questions and writes the config file. Nothing changes until the last step.", "",
                      ("good", "✓ Python " + platform.python_version())]
@@ -434,7 +554,11 @@ class Wizard:
                           "gh did not list any, so write the name as GitHub shows it in the Actions tab. For example: TestFlight.",
                           "Use a comma for more than one."],
             "label": ["Which label do the requests have?",
-                      "To ask for a start, a person or a tool opens an issue with this label.",
+                      "To ask for a start, a person or a tool opens an issue with this label."]
+                     + (["On GitHub these labels look like requests: " + ", ".join(
+                         [name for name in self.labels if "request" in name.lower()][:6])]
+                        if any("request" in name.lower() for name in self.labels) else [])
+                     + [
                       "The title of the issue is the workflow name, a branch and a commit. For example: "
                       + (a["workflows"] or ["Deploy"])[0] + ": main a0d3a70"],
             "save": (["Saved.", "", "These workflows wait for your yes: " + (", ".join(a["workflows"]) or "none"),
@@ -484,7 +608,11 @@ class Wizard:
             hint = "enter: open the screen"
         if self.step == "save":
             hint = "enter: back to the screen · esc: back"
-        return {"title": title, "lines": self.text(), "field": self.field if kind == "text" else None,
+        busy = (self.SPINNER[int(time.time() * 10) % len(self.SPINNER)] + " " + self.busy) if self.busy else None
+        if busy:
+            hint = "esc: stop waiting"
+        return {"title": title, "lines": [] if self.hide else self.text(),
+                "field": self.field if kind == "text" and not self.hide else None, "busy": busy,
                 "secret": self.step == "token", "fresh": self.fresh, "hint": hint, "note": self.note, "bad": self.bad}
 
 
@@ -499,6 +627,8 @@ def draw(canvas, view):
     if view["field"] is not None:
         shown = ("●" * len(view["field"])) if view["secret"] else view["field"]
         rows += [("plain", ""), ("dim" if view["fresh"] else "strong", "› " + shown[-(inner - 4):] + "▏")]
+    if view["busy"]:
+        rows += [("plain", ""), ("warm", view["busy"])]
     if view["note"]:
         rows += [("plain", "")] + [("bad" if view["bad"] else "warm", piece) for piece in textwrap.wrap(view["note"], inner)]
     height = min(canvas.height, len(rows) + 5)
@@ -513,10 +643,12 @@ def run(terminal, wizard):
     """The wizard on the terminal, until it is done or stopped. The config, or None."""
     colours()
     while not wizard.finished:
+        wizard.tick()
         canvas = Screen(terminal)
         draw(canvas, wizard.view())
         canvas.flush()
-        key = terminal.key()
+        # Quick while something turns on the screen, slow when it waits for a key.
+        key = terminal.key(0.1 if wizard.busy or wizard.working else 1.0)
         if key == K_RESIZE:
             sys.stdout.buffer.write(b"\x1b[2J")
         elif key != -1:

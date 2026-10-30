@@ -213,8 +213,12 @@ from runner import setup as setupmod
 
 
 class Checks:
-    def __init__(self, gh=(True, True), seen=None, ssh=True, workflows=None):
+    def __init__(self, gh=(True, True), seen=None, ssh=True, workflows=None, labels=None):
         self.gh_state, self.seen, self.ssh_ok, self.names = gh, seen or {}, ssh, workflows or {}
+        self.label_names = labels or {}
+
+    def labels(self, repo):
+        return self.label_names.get(repo, [])
 
     def workflows(self, repo):
         return self.names.get(repo, [])
@@ -226,7 +230,7 @@ class Checks:
         return self.seen.get(repo, True)
 
     def ssh(self, host):
-        return self.ssh_ok
+        return self.ssh_ok, "" if self.ssh_ok else "The PC refuses the connection."
 
 
 def wipe_and_type(wizard, text):
@@ -247,7 +251,7 @@ with tempfile.TemporaryDirectory() as tmp:
     path = os.path.join(tmp, "conf", "config.ini")
 
     def wizard_for(**kinds):
-        return setupmod.Wizard(Checks(**kinds), install=lambda: installed.append(1) or "Open a new terminal.\nType: runner",
+        return setupmod.Wizard(Checks(**kinds), threaded=False, install=lambda: installed.append(1) or "Open a new terminal.\nType: runner",
                                make=lambda cfg, n, token: made.append((cfg.local["name"], n, token)), path=path)
 
     # the whole way, with every question answered
@@ -352,6 +356,26 @@ with tempfile.TemporaryDirectory() as tmp:
     answer(w)
     assert w.field == "build-request" and "Build: main a0d3a70" in str(w.text())
 
+    # the label offered is one that is on GitHub already and fits a chosen workflow
+    def label_for(labels, picks):
+        w = wizard_for(workflows={"a/b": ["Build", "CI", "TestFlight"]}, labels={"a/b": labels})
+        answer(w); answer(w, "a/b"); answer(w, "0"); w.feed(ord("n")); w.feed(ord("y"))
+        for index in picks:
+            while w.cursor < index:
+                w.feed(terminal.K_DOWN)
+            w.feed(32)
+        answer(w)
+        assert w.step == "label"
+        return w
+
+    w = label_for(["bug", "testflight-request"], [0, 1, 2])                  # Build, CI and TestFlight chosen
+    assert w.field == "testflight-request" and "testflight-request" in " ".join(map(str, w.text()))
+    assert label_for([], [0, 1]).field == "build-request"                    # nothing on GitHub: from the first
+    assert label_for(["build-request", "testflight-request"], [0, 2]).field == "build-request"   # the first one's own label wins
+    assert label_for(["release-request", "Test-Flight request"], [2]).field == "testflight-request"
+    assert label_for(["ci-request"], [1]).field == "ci-request"
+    assert label_for(["special-request"], [1]).field == "ci-request"         # ci is not a word of special-request
+
     # no list from gh: the names are typed, as before
     w = wizard_for()
     answer(w); answer(w, "a/b"); answer(w, "0"); w.feed(ord("n")); w.feed(ord("y"))
@@ -386,7 +410,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # the same questions again, for a config that is there: what is set is chosen to begin with
     cfg_now = configured("[deck]\nrepos = a/b\n[approval]\nworkflows = TestFlight\nlabel = testflight-request\n")
     open(plain, "w").write("[deck]\nrepos = a/b\n[approval]\nworkflows = TestFlight\nlabel = testflight-request\n")
-    w = setupmod.Wizard.for_approval(cfg_now, Checks(workflows={"a/b": ["CI", "Build", "TestFlight"]}), path=plain)
+    w = setupmod.Wizard.for_approval(cfg_now, Checks(workflows={"a/b": ["CI", "Build", "TestFlight"]}), path=plain, threaded=False)
     assert w.step == "workflows" and w.kind() == "pick" and w.picked == {2}
     w.feed(32)                                                                 # CI on as well
     answer(w)
@@ -396,11 +420,11 @@ with tempfile.TemporaryDirectory() as tmp:
     assert configmod.load(plain).approval == {"workflows": ["CI", "TestFlight"], "label": "testflight-request"}
     answer(w)
     assert w.finished and not w.cancelled
-    w = setupmod.Wizard.for_approval(cfg_now, Checks(workflows={"a/b": ["CI", "TestFlight"]}), path=plain)
+    w = setupmod.Wizard.for_approval(cfg_now, Checks(workflows={"a/b": ["CI", "TestFlight"]}), path=plain, threaded=False)
     w.feed(terminal.K_DOWN); w.feed(32)                                        # TestFlight off: none wait
     answer(w)
     assert w.step == "save" and w.saved and configmod.load(plain).approval == {"workflows": [], "label": ""}
-    w = setupmod.Wizard.for_approval(cfg_now, Checks(workflows={"a/b": ["CI"]}), path=plain)
+    w = setupmod.Wizard.for_approval(cfg_now, Checks(workflows={"a/b": ["CI"]}), path=plain, threaded=False)
     w.feed(27)
     assert w.finished and w.cancelled and not w.saved                          # escape at the start changes nothing
 
@@ -430,7 +454,7 @@ with tempfile.TemporaryDirectory() as tmp:
             # a row that skips a number is not a row: only the part before the gap
             gap = [item for item in found if item["name"] != "mac-2"]
             assert runners.plan_of(gap)[0]["count"] == 1
-            w = setupmod.Wizard(Checks(), finder=lambda: runners.find_runners(home), path=os.path.join(home, "c.ini"))
+            w = setupmod.Wizard(Checks(), threaded=False, finder=lambda: runners.find_runners(home), path=os.path.join(home, "c.ini"))
             assert any("found 4" in str(line) for line in w.text()) and any("pc-runner" in str(line) for line in w.text())
             answer(w)
             assert w.field == "o/app, o/lib"                                   # the repositories of what was found, the managed row's first
@@ -509,7 +533,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # a warning is said once; the same answer again keeps it
     w = wizard_for(ssh=False)
     answer(w); answer(w, "a/b"); answer(w, "0"); w.feed(ord("y")); answer(w, "me@pc")
-    assert w.step == "ssh" and not w.bad and "without a password" in w.note
+    assert w.step == "ssh" and not w.bad and "refuses the connection" in w.note and "Press Enter again" in w.note
     answer(w)
     assert w.step == "service"
     w = wizard_for(gh=(False, False), seen={"a/b": None})
@@ -518,6 +542,62 @@ with tempfile.TemporaryDirectory() as tmp:
     assert w.step == "repos" and "not checked" in w.note
     answer(w)
     assert w.step == "count"
+
+    # slow things wait off the screen's thread, with a spinner; escape stops the waiting
+    class Slow(Checks):
+        def ssh(self, host):
+            time.sleep(0.4)
+            return False, "The PC refuses the connection."
+
+        def gh(self):
+            time.sleep(0.2)
+            return True, True
+
+    def settle(wizard, limit=5):
+        end = time.time() + limit
+        while wizard.busy and time.time() < end:
+            wizard.tick()
+            time.sleep(0.02)
+        assert not wizard.busy
+
+    w = setupmod.Wizard(Slow(), path=path, threaded=True)
+    assert w.busy and "Looking at this computer" in w.view()["busy"] and w.view()["lines"] == [] and w.view()["field"] is None
+    w.feed(13)                                   # keys wait while it works
+    assert w.step == "welcome" and w.busy
+    settle(w)
+    assert w.view()["busy"] is None and w.view()["lines"]
+    answer(w); settle(w)                         # to the repository question; gh knows the name at once
+    answer(w, "a/b"); settle(w)
+    answer(w, "0"); w.feed(ord("y"))
+    assert w.step == "ssh"
+    wipe_and_type(w, "me@pc")
+    w.feed(13)
+    assert w.busy and "Trying to connect" in w.view()["busy"] and w.view()["field"] == "me@pc" and w.view()["hint"] == "esc: stop waiting"
+    w.feed(ord("x"))                              # typing waits too
+    assert w.field == "me@pc"
+    settle(w)
+    assert w.step == "ssh" and "refuses the connection" in w.note and not w.bad
+    w.feed(13)                                    # the same again: it goes on at once, with the address kept
+    assert not w.busy and w.step == "service" and w.answers["ssh"] == "me@pc"
+    w.feed(27)
+    w.feed(13)
+    assert w.busy
+    w.feed(27)                                    # stop waiting: the answer, when it comes, is not used
+    assert not w.busy and w.step == "ssh" and w.note == ""
+    time.sleep(0.7)
+    w.tick()
+    assert w.step == "ssh" and w.note == ""
+
+    # ssh's own words, as things to do
+    host = "me@pc"
+    for said, word in (("ssh: connect to host pc port 22: Connection refused", "SSH server"),
+                       ("me@pc: Permission denied (publickey).", "ssh-copy-id me@pc"),
+                       ("Host key verification failed.", "ssh me@pc"),
+                       ("ssh: Could not resolve hostname pc: Name or service not known", "IP address"),
+                       ("ssh: connect to host 10.0.0.9 port 22: Operation timed out", "same network"),
+                       ("ssh: connect to host 10.0.0.9 port 22: No route to host", "same network"),
+                       ("something else\nlast words", "last words"), ("", "did not connect")):
+        assert word in setupmod.explain_ssh(said, host), (said, setupmod.explain_ssh(said, host))
 
     # a token that is not one is refused; none at all asks gh later
     w = wizard_for()
@@ -565,7 +645,7 @@ if not system.WINDOWS:
             os.write(fd, text.encode())
             until(then)
 
-        until("Welcome")
+        until("a few questions")                 # the welcome, once it has looked around
         send("\r", "Which repository")
         send("owner/name\r", "How many runners")
         send("0\r", "second computer")
