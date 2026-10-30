@@ -9,7 +9,7 @@ import sys
 import textwrap
 import threading
 from .config import ConfigError, HOST, SLUG, WORD, configure, default_path
-from .runners import Runner, TOKEN, gh_token, set_up
+from .runners import Runner, TOKEN, find_runners, gh_token, plan_of, set_up
 from .terminal import K_BACKSPACE, K_RESIZE, Screen, colours, frame
 
 # Each step: its kind (info, text or yesno) and the title on the right of its frame.
@@ -88,8 +88,9 @@ class Wizard:
     """The questions as a machine that is fed keys and shows a view: the screen
     only draws it, so it can be tested without a terminal."""
 
-    def __init__(self, checks=None, install=None, make=None, path=None):
+    def __init__(self, checks=None, install=None, make=None, path=None, finder=None):
         self.checks = checks or Checks()
+        self.finder = finder or find_runners
         self.install = install
         self.make = make or make_runner
         self.path = path or default_path()
@@ -103,6 +104,7 @@ class Wizard:
         self.finished = self.cancelled = self.working = False
         self.progress = []
         self.gh = (False, False)
+        self.found, self.plan, self.left = [], None, []
         self.enter()
 
     # ---- moving between steps
@@ -113,6 +115,12 @@ class Wizard:
         self.note, self.bad, self.kept = "", False, False
         if self.step == "welcome":
             self.gh = self.checks.gh()
+            # Runners that are there already are offered, not made again.
+            self.found = self.finder()
+            self.plan, self.left = plan_of(self.found)
+            if self.plan:
+                self.answers["name"], self.answers["dir"] = self.plan["name"], self.plan["dir"]
+            self.field = self.default("welcome")
         elif self.step == "work":
             self.working = True
             threading.Thread(target=self.work, daemon=True).start()
@@ -180,7 +188,10 @@ class Wizard:
     # ---- the questions
     def default(self, step):
         a = self.answers
-        return {"repos": "", "count": "0", "name": a["name"], "dir": a["dir"], "local_repo": (a["repos"] or [""])[0],
+        # The repository of the row that can be managed first: new runners go there.
+        first = [self.plan["repo"]] if self.plan and self.plan["repo"] else []
+        repos = list(dict.fromkeys(first + [item["repo"] for item in self.found if item["repo"]]))
+        return {"repos": ", ".join(repos), "count": str(self.plan["count"]) if self.plan else "0", "name": a["name"], "dir": a["dir"], "local_repo": self.plan["repo"] if self.plan and self.plan["repo"] in a["repos"] else (a["repos"] or [""])[0],
                 "token": "", "other": "n", "ssh": "", "service": "", "approval": "n", "workflows": "",
                 "label": (a["workflows"][0].lower().replace(" ", "-") + "-request") if a["workflows"] else "",
                 "command": "y"}.get(step, "")
@@ -302,12 +313,22 @@ class Wizard:
                 lines.append(("bad", "✗ gh is installed, but you are not signed in. Run: gh auth login"))
             else:
                 lines.append(("bad", "✗ gh is not installed. Get it from https://cli.github.com"))
+            if self.found:
+                lines += ["", ("good", f"✓ I found {len(self.found)} runner(s) on this machine:")]
+                lines += [("plain", f"   {item['name']}  {item['dir']}  {item['repo']}") for item in self.found]
+                if self.plan:
+                    lines += [("dim", "   The next questions offer them, so you only press Enter.")]
+                if self.left:
+                    lines += [("warm", "   The program cannot manage these: " + ", ".join(item["name"] for item in self.left)
+                                       + ". They need a name and a folder like name, name-2, and folder, folder-2.")]
             if not signed:
                 lines += ["", "You can go on, but the program cannot show the runs until gh works."]
             return lines
         return {
             "repos": ["Which repository do you want to watch?", "Write owner/name. Use a comma for more than one."],
-            "count": ["How many runners do you want on this machine?", "0 means none: you only watch."],
+            "count": ["How many runners do you want on this machine?",
+                      ("I found " + str(self.plan["count"]) + " set up here. Keep the number to use them."
+                       if self.plan else "0 means none: you only watch.")],
             "name": ["What name do the runners get?", f"They are called {a['name']}, {a['name']}-2, {a['name']}-3 and so on."],
             "dir": ["In which folder do the runners live?", "The second runner gets the same name with -2 after it."],
             "local_repo": ["For which repository are the new runners?"],

@@ -1,4 +1,6 @@
 """The runners on this machine: their state from their own log, setting up new ones, starting and stopping them."""
+import glob
+import json
 import os
 import re
 import shutil
@@ -6,6 +8,7 @@ import subprocess
 import sys
 import time
 from .util import moment
+from .config import SLUG
 from .system import WINDOWS, alive, apart, download, end, notify, own_command, release, write
 
 
@@ -215,3 +218,76 @@ def runner_count(cfg):
     while Runner(cfg, count + 1).configured:
         count += 1
     return count
+
+
+
+# Folders the scan does not enter: macOS asks the user's permission for some of
+# them, and the rest hold things that are never a runner.
+SKIP = {"Library", "Documents", "Desktop", "Downloads", "Pictures", "Movies", "Music", "Applications", "AppData",
+        "node_modules", "target", "site-packages", "venv", ".git", ".cache", ".cargo", ".rustup", ".npm", ".Trash"}
+
+
+def find_runners(home=None, depth=3, limit=3000):
+    """The runners already set up on this machine: the folders that hold the
+    `.runner` file a runner writes when it is registered. Looks in the usual
+    places and walks the home folder a few levels down. [{dir, name, repo}]"""
+    home = home or os.path.expanduser("~")
+    places = set(glob.glob(os.path.join(home, "actions-runner*")))
+    places |= set(glob.glob("/opt/actions-runner*")) | set(glob.glob("C:\\actions-runner*"))
+    seen = 0
+    todo = [(home, 0)]
+    while todo and seen < limit:
+        folder, level = todo.pop()
+        seen += 1
+        try:
+            entries = list(os.scandir(folder))
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=False) and entry.name not in SKIP and level < depth:
+                    todo.append((entry.path, level + 1))
+                elif entry.name == ".runner" and entry.is_file(follow_symlinks=False):
+                    places.add(folder)
+            except OSError:
+                continue
+    found = []
+    for folder in sorted(places):
+        try:
+            with open(os.path.join(folder, ".runner"), encoding="utf-8-sig") as file:
+                info = json.load(file)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(info, dict):
+            continue
+        url = str(info.get("gitHubUrl", ""))
+        repo = url.split("github.com/", 1)[-1].strip("/") if "github.com/" in url else ""
+        name = info.get("agentName")
+        found.append({"dir": folder, "name": name if isinstance(name, str) else os.path.basename(folder),
+                      "repo": repo if SLUG.match(repo) else ""})
+    return found
+
+
+def plan_of(found, home=None):
+    """What the config can say of runners that were found: a name and a folder
+    with -2, -3 after them, and how many. None if they are not in such a row.
+    The rest are left over: the config cannot hold them."""
+    home = home or os.path.expanduser("~")
+    by_dir = {item["dir"]: item for item in found}
+    # Try every folder as the start of a row, and keep the longest.
+    best = None
+    for item in found:
+        count = 1
+        while f"{item['dir']}-{count + 1}" in by_dir and by_dir[f"{item['dir']}-{count + 1}"]["name"] == f"{item['name']}-{count + 1}":
+            count += 1
+        if best is None or count > best[0]:
+            best = (count, item)
+    if not best:
+        return None, []
+    count, item = best
+    row = {item["dir"]} | {f"{item['dir']}-{k}" for k in range(2, count + 1)}
+    shown = item["dir"]
+    if shown.startswith(home + os.sep):
+        shown = "~" + shown[len(home):]
+    return ({"name": item["name"], "dir": shown, "count": count, "repo": item["repo"]},
+            [other for other in found if other["dir"] not in row])

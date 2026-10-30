@@ -291,6 +291,49 @@ with tempfile.TemporaryDirectory() as tmp:
     w.feed(127)
     assert w.field == shown[:-1]
 
+    # runners that are set up already are found, and offered as the answers
+    with tempfile.TemporaryDirectory() as home:
+        def registered(folder, name, repo, bom=True):
+            os.makedirs(os.path.join(home, folder), exist_ok=True)
+            with open(os.path.join(home, folder, ".runner"), "w", encoding="utf-8-sig" if bom else "utf-8") as file:
+                file.write('{"agentId": 1, "agentName": "%s", "gitHubUrl": "https://github.com/%s", "workFolder": "_work"}' % (name, repo))
+        registered("actions-runner", "mac", "o/app")
+        registered("actions-runner-2", "mac-2", "o/app", bom=False)
+        registered("actions-runner-3", "mac-3", "o/app")
+        registered(".local/share/numa-runner", "pc-runner", "o/lib")
+        registered("Documents/old/runner", "never", "o/app")                 # macOS asks leave to look: not entered
+        os.makedirs(os.path.join(home, "broken"))
+        open(os.path.join(home, "broken", ".runner"), "w").write("not json")  # said nothing of, not a crash
+        found = runners.find_runners(home)
+        assert sorted(item["name"] for item in found) == ["mac", "mac-2", "mac-3", "pc-runner"], found
+        assert {item["repo"] for item in found} == {"o/app", "o/lib"}
+        before = os.environ.get("HOME")
+        os.environ["HOME"] = home
+        try:
+            plan, left = runners.plan_of(found)
+            assert plan == {"name": "mac", "dir": "~/actions-runner", "count": 3, "repo": "o/app"}, plan
+            assert [item["name"] for item in left] == ["pc-runner"]
+            assert runners.plan_of([]) == (None, [])
+            # a row that skips a number is not a row: only the part before the gap
+            gap = [item for item in found if item["name"] != "mac-2"]
+            assert runners.plan_of(gap)[0]["count"] == 1
+            w = setupmod.Wizard(Checks(), finder=lambda: runners.find_runners(home), path=os.path.join(home, "c.ini"))
+            assert any("found 4" in str(line) for line in w.text()) and any("pc-runner" in str(line) for line in w.text())
+            answer(w)
+            assert w.field == "o/app, o/lib"                                   # the repositories of what was found, the managed row's first
+            answer(w)
+            assert w.step == "count" and w.field == "3"
+            answer(w)
+            assert w.step == "name" and w.field == "mac"
+            answer(w)
+            assert w.step == "dir" and w.field == "~/actions-runner"
+            answer(w)
+            assert w.step == "local_repo" and w.field == "o/app"
+        finally:
+            os.environ["HOME"] = before if before is not None else ""
+            if before is None:
+                del os.environ["HOME"]
+
     # a runner that is set up already is not downloaded or registered again
     with tempfile.TemporaryDirectory() as there:
         calls = []

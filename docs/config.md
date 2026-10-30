@@ -53,6 +53,12 @@ Other options in `[local]`:
 
 A runner that you add with `n` is not in the config file. The program finds it by its folder.
 
+## Runners that are set up already
+
+There is no standard folder for a runner. The first start looks for the file `.runner` that a runner writes when it is registered. It looks in `~/actions-runner*` and a few levels down in your home folder. It does not look in `Documents`, `Desktop`, `Downloads`, or `Library`, because macOS asks you for permission to look there.
+
+The setup then offers what it found: the repository, the name, the folder, and how many. The runners must be called `name`, `name-2`, `name-3`, in the folders `folder`, `folder-2`, `folder-3`. A runner in another place is shown, but the program cannot manage it. The program never downloads or registers a runner that is set up already.
+
 ### 3. Show a second machine
 
 The second machine is a Linux PC. You reach it with SSH. Its runner is a systemd user service.
