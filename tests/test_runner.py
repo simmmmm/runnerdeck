@@ -447,7 +447,7 @@ if not system.WINDOWS:
         until("Welcome")
         send("\r", "Which repository")
         send("owner/name\r", "How many runners")
-        send("0\r", "another machine")
+        send("0\r", "second computer")
         send("n", "approval")
         send("n", "runner` command")
         send("y", "This is the config file")
