@@ -1,7 +1,9 @@
 """Builds that do not go through GitHub: `runnerdeck run` records them, the screen reads them."""
+import glob
 import json
 import os
 import platform
+import re
 import shlex
 import subprocess
 import sys
@@ -48,7 +50,7 @@ def normalize(info, mtime, now):
     else:
         status = "running" if now - mtime < FRESH else "interrupted"
     return {"id": text("id", 60), "name": text("name", 60), "cmd": text("cmd"), "cwd": text("cwd"),
-            "branch": text("branch", 60), "sha": text("sha", 12), "host": text("host", 40),
+            "branch": text("branch", 60), "sha": text("sha", 12), "host": text("host", 40), "toolchain": text("toolchain", 60),
             "start": start, "end": end, "code": code, "status": status}
 
 
@@ -75,6 +77,85 @@ def recent(limit=10, root=None):
         if item:
             found.append(item)
     return found
+
+
+def read_text(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as file:
+            return file.read()
+    except OSError:
+        return ""
+
+
+def rust_toolchain(cwd, argv=(), timeout=3.0):
+    """The Rust toolchain that a build here would use, as "rustc 1.82.0 stable", or "" if this is not a Rust
+    folder. Rustup's own rules, read from its files: +toolchain on the command, RUSTUP_TOOLCHAIN, an override
+    of this folder, a rust-toolchain(.toml) file, the default. Not by running `rustc`: in a folder whose
+    file names a toolchain that is not installed, rustup would download it, and a log must install nothing.
+    The compiler of the toolchain's own folder is run directly instead, which never downloads."""
+    folders, here = [], os.path.abspath(cwd)
+    for _ in range(8):
+        folders.append(here)
+        parent = os.path.dirname(here)
+        if parent == here:
+            break
+        here = parent
+    file_choice = ""
+    for folder in folders:
+        for name in ("rust-toolchain.toml", "rust-toolchain"):
+            body = read_text(os.path.join(folder, name))
+            found = re.search(r'channel\s*=\s*"([^"]+)"', body) or (
+                None if "=" in body or not body.strip() else re.match(r"\s*([^\s#]+)", body))
+            if found and not file_choice:
+                file_choice = found.group(1)
+    if not file_choice and not any(os.path.exists(os.path.join(folder, "Cargo.toml")) for folder in folders):
+        return ""
+    home = os.environ.get("RUSTUP_HOME") or os.path.expanduser("~/.rustup")
+    settings = read_text(os.path.join(home, "settings.toml"))
+    default = (re.search(r'^default_toolchain\s*=\s*"([^"]+)"', settings, re.M) or [None, ""])[1]
+    override, best = "", -1
+    for path, chosen in re.findall(r'^"([^"]+)"\s*=\s*"([^"]+)"', settings.split("[overrides]")[-1], re.M) if "[overrides]" in settings else []:
+        if (os.path.abspath(cwd) == path or os.path.abspath(cwd).startswith(path.rstrip(os.sep) + os.sep)) and len(path) > best:
+            override, best = chosen, len(path)
+    wanted = (argv[1][1:] if len(argv) > 1 and argv[1].startswith("+") and os.path.basename(argv[0]) in
+              ("cargo", "rustc", "rustdoc", "rustfmt", "cargo-clippy") else "")
+    wanted = wanted or os.environ.get("RUSTUP_TOOLCHAIN") or override or file_choice or default
+    root = os.path.join(home, "toolchains")
+    if not os.path.isdir(root):
+        # No rustup: whatever rustc there is on the PATH (a distribution's own, or none).
+        compiler, label = "rustc", ""
+    else:
+        if not wanted:
+            return ""
+        matches = sorted(name for name in os.listdir(root) if name == wanted or name.startswith(wanted + "-"))
+        if not matches:
+            return f"{wanted} (not installed)"
+        compiler, label = os.path.join(root, matches[0], "bin", "rustc"), re.sub(
+            r"-(x86_64|aarch64|i686|i586|armv7|arm|riscv64gc|powerpc64le|s390x|loongarch64)[A-Za-z0-9_.-]*$", "", matches[0])
+    try:
+        said = subprocess.run([compiler, "--version"], capture_output=True, text=True, timeout=timeout).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return label
+    version = " ".join(said[:2]) if len(said) >= 2 and said[0] == "rustc" else ""
+    if label and version.endswith(" " + label):
+        label = ""                              # a toolchain that is only a version: it is said once
+    return f"{version} {label}".strip()
+
+
+# What can tell which tools a build used: each takes the folder and the command and gives a short text, or "".
+# Add one for another language here (Go, Node, Python ...) and it is recorded and shown the same way.
+DETECTORS = (rust_toolchain,)
+
+
+def toolchain(cwd, argv):
+    for detect in DETECTORS:
+        try:
+            found = detect(cwd, argv)
+        except Exception:
+            found = ""
+        if found:
+            return found
+    return ""
 
 
 def default_name(argv):
@@ -112,7 +193,8 @@ def record(argv, name=None, root=None, beat=20.0):
     path = os.path.join(directory, ident + ".json")
     info = {"id": ident, "name": name or default_name(argv), "cmd": " ".join(shlex.quote(part) for part in argv),
             "cwd": cwd, "branch": git(cwd, "rev-parse", "--abbrev-ref", "HEAD"), "sha": git(cwd, "rev-parse", "--short", "HEAD"),
-            "host": platform.node().split(".")[0], "start": started, "end": None, "code": None}
+            "host": platform.node().split(".")[0], "toolchain": toolchain(cwd, argv),
+            "start": started, "end": None, "code": None}
     write(path, info)
     stop = threading.Event()
 

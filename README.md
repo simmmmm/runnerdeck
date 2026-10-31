@@ -23,7 +23,7 @@
 - It shows CPU, GPU, memory, and temperature of your machines. It reads a second computer over SSH, a Linux PC or a Mac.
 - It shows the last workflow runs of your repositories. You can cancel, repeat, or open a run.
 - The first time, it asks a few questions on the screen and writes the config file for you. It finds runners that are set up already.
-- It shows builds that are not on GitHub too, when you start them with `runnerdeck run -- <command>`. See [Builds](docs/builds.md).
+- It shows builds that are not on GitHub too, when you start them with `runnerdeck run -- <command>`. For a Rust project it says which compiler was used. See [Builds](docs/builds.md).
 - You can add a new runner. You only paste the token.
 - You can keep a workflow behind your approval, and change which ones later. Approval is a request that you answer on the screen. It does not lock the workflow: see [Approval](docs/approval.md).
 

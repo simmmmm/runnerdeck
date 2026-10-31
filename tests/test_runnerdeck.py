@@ -1303,6 +1303,95 @@ assert "runners · macbook" in shown and "1 of 2 busy" in shown and "Running bui
 gone = drawn(two, nothing, [remote_mac(reachable=False)], width=110)
 assert "macbook not answering" in gone.splitlines()[0] and "╭─ macbook" not in gone and "runners · macbook" not in gone
 
+# --- which Rust toolchain a build used: read from rustup's own files, never by asking rustup (it would download)
+with tempfile.TemporaryDirectory() as tmp:
+    def fake_toolchain(name, version, body=None):
+        folder = os.path.join(tmp, "rustup", "toolchains", name, "bin")
+        os.makedirs(folder)
+        with open(os.path.join(folder, "rustc"), "w") as file:
+            file.write(body or f'#!/bin/sh\necho "rustc {version} (abc123 2024-10-15)"\n')
+        os.chmod(os.path.join(folder, "rustc"), 0o755)
+
+    def folder_with(name, **files):
+        path = os.path.join(tmp, name)
+        os.makedirs(path, exist_ok=True)
+        for filename, body in files.items():
+            with open(os.path.join(path, filename.replace("_", ".", 1) if filename.startswith("rust-toolchain_") else filename), "w") as file:
+                file.write(body)
+        return path
+
+    fake_toolchain("stable-x86_64-unknown-linux-gnu", "1.82.0")
+    fake_toolchain("nightly-2025-01-15-x86_64-unknown-linux-gnu", "1.86.0-nightly")
+    fake_toolchain("1.70.0-x86_64-unknown-linux-gnu", "1.70.0")
+    fake_toolchain("slow-x86_64-unknown-linux-gnu", "9", body="#!/bin/sh\nsleep 5\n")
+    pinned = os.path.join(tmp, "pinned")
+    with open(os.path.join(tmp, "rustup", "settings.toml"), "w") as file:
+        file.write('version = "12"\ndefault_toolchain = "stable-x86_64-unknown-linux-gnu"\nprofile = "default"\n\n'
+                   f'[overrides]\n"{pinned}" = "1.70.0-x86_64-unknown-linux-gnu"\n')
+    # a rustup and a rustc on the PATH that tell if they are run at all: they must not be
+    trap_bin, marker_file = os.path.join(tmp, "trap"), os.path.join(tmp, "was-run")
+    os.makedirs(trap_bin)
+    for tool in ("rustup", "rustc", "cargo"):
+        with open(os.path.join(trap_bin, tool), "w") as file:
+            file.write(f'#!/bin/sh\necho {tool} >> "{marker_file}"\n')
+        os.chmod(os.path.join(trap_bin, tool), 0o755)
+    saved = {key: os.environ.get(key) for key in ("RUSTUP_HOME", "RUSTUP_TOOLCHAIN", "PATH")}
+    os.environ["RUSTUP_HOME"], os.environ["PATH"] = os.path.join(tmp, "rustup"), trap_bin + os.pathsep + os.environ["PATH"]
+    os.environ.pop("RUSTUP_TOOLCHAIN", None)
+    try:
+        plain = folder_with("plain")
+        rusty = folder_with("rusty", **{"Cargo.toml": "[package]\n"})
+        night = folder_with("night", **{"Cargo.toml": "", "rust-toolchain_toml": '[toolchain]\nchannel = "nightly-2025-01-15"\ncomponents = ["clippy"]\n'})
+        legacy = folder_with("legacy", **{"Cargo.toml": "", "rust-toolchain": "nightly-2025-01-15\n"})
+        lacking = folder_with("lacking", **{"Cargo.toml": "", "rust-toolchain_toml": '[toolchain]\nchannel = "1.99.0"\n'})
+        folder_with("pinned", **{"Cargo.toml": ""})
+        deep = os.path.join(rusty, "crates", "inner")
+        os.makedirs(deep)
+        assert builds.rust_toolchain(plain) == ""                                          # not a Rust folder: nothing said
+        assert builds.rust_toolchain(rusty) == "rustc 1.82.0 stable"                       # the default
+        assert builds.rust_toolchain(deep) == "rustc 1.82.0 stable"                        # a folder in the project
+        assert builds.rust_toolchain(night) == "rustc 1.86.0-nightly nightly-2025-01-15"   # its file says which
+        assert builds.rust_toolchain(legacy) == "rustc 1.86.0-nightly nightly-2025-01-15"  # the old one-line file too
+        assert builds.rust_toolchain(lacking) == "1.99.0 (not installed)"                  # not there: said, not fetched
+        assert builds.rust_toolchain(pinned) == "rustc 1.70.0"                             # an override of that folder; a version is said once
+        assert builds.rust_toolchain(rusty, ["cargo", "+nightly-2025-01-15", "test"]) == "rustc 1.86.0-nightly nightly-2025-01-15"
+        assert builds.rust_toolchain(rusty, ["make", "+nightly-2025-01-15"]) == "rustc 1.82.0 stable"   # only cargo and friends take +toolchain
+        os.environ["RUSTUP_TOOLCHAIN"] = "1.70.0"
+        assert builds.rust_toolchain(rusty) == "rustc 1.70.0" and builds.rust_toolchain(night) == "rustc 1.70.0"   # the variable wins over files
+        os.environ["RUSTUP_TOOLCHAIN"] = "slow"
+        started_at = time.time()
+        assert builds.rust_toolchain(rusty, timeout=0.3) == "slow" and time.time() - started_at < 3   # a compiler that hangs is not waited for
+        os.environ.pop("RUSTUP_TOOLCHAIN")
+        assert not os.path.exists(marker_file), open(marker_file).read()                   # rustup, rustc and cargo of the PATH were never run
+        # a record carries it, and it is read back and cleaned like the rest
+        previous = os.getcwd()
+        os.chdir(night)
+        try:
+            builds.record([sys.executable, "-c", "pass"], name="in a rust folder", root=os.path.join(tmp, "data"))
+        finally:
+            os.chdir(previous)
+        assert builds.recent(root=os.path.join(tmp, "data"))[0]["toolchain"] == "rustc 1.86.0-nightly nightly-2025-01-15"
+        assert builds.normalize({"name": "x", "toolchain": "rustc\x1b[2J 1"}, 0, 0)["toolchain"] == "rustc[2J 1"
+        assert builds.normalize({"name": "x"}, 0, 0)["toolchain"] == ""                      # a record from before has none
+        # no rustup at all: the compiler of the PATH, if there is one
+        os.environ["RUSTUP_HOME"] = os.path.join(tmp, "no-rustup-here")
+        with open(os.path.join(trap_bin, "rustc"), "w") as file:
+            file.write('#!/bin/sh\necho "rustc 1.50.0 (abc 2021-01-01)"\n')
+        assert builds.rust_toolchain(rusty) == "rustc 1.50.0"
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    # shown in the box after the commit, as far as the line has room, and nothing breaks where it has none
+    grid = terminal.Grid(5, 120)
+    boxes.builds_box(grid, 0, 120, [dict(a_build("tests", "success", t0 - 500, t0 - 400, 0), toolchain="rustc 1.82.0 stable")])
+    assert "rustc 1.82.0 stable" in grid.text()
+    narrow = terminal.Grid(5, 70)
+    boxes.builds_box(narrow, 0, 70, [dict(a_build("tests", "success", t0 - 500, t0 - 400, 0), toolchain="rustc 1.82.0 stable")])
+    assert "succeeded" in narrow.text() and "rustc 1.82.0 stable" not in narrow.text()
+
 # --- one file from the package: it runs, and what it starts again (the watcher) finds itself
 with tempfile.TemporaryDirectory() as tmp:
     from runnerdeck import app

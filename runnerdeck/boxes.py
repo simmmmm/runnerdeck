@@ -254,7 +254,11 @@ def builds_box(canvas, y, width, builds, title="builds"):
         else:
             took = f" in {span(build['end'] - build['start'])}" if build["end"] and build["start"] else ""
             word, when = {"success": "succeeded", "failure": "failed"}.get(build["status"], build["status"]) + took, ago(build["end"])
-        right(canvas, line, width, f"{word} · {when}", style if style != "dim" else "label")
+        tail = f"{word} · {when}"
+        right(canvas, line, width, tail, style if style != "dim" else "label")
+        room = width - 2 - len(tail) - 53
+        if build.get("toolchain") and room > 6:
+            canvas.put(line, 53, build["toolchain"][:room - 1], "dim")
     return y + 2 + len(shown)
 
 

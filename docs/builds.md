@@ -19,6 +19,20 @@ A box `builds` shows the latest five, as the runners are shown:
 
 If the computer with the builds is another one that you watch over SSH, its builds show in a box with its name (`builds · pc`).
 
+## Which Rust toolchain
+
+For a Rust folder (a `Cargo.toml`, or a `rust-toolchain` file, in it or above it), the record says which compiler was used, like `rustc 1.82.0 stable`. It shows after the commit in the `builds` box, where the line has room.
+
+This matters when a project does not pin its toolchain: every machine then uses its own default, and two machines can build with different compilers without anybody seeing it. The record shows it.
+
+The program follows the rules of rustup, in their order: `+toolchain` on a `cargo` command, `RUSTUP_TOOLCHAIN`, an override that was set for the folder, a `rust-toolchain` or `rust-toolchain.toml` file, and last the default.
+
+It reads these from the files of rustup and does not ask rustup. A folder can name a toolchain that is not installed, and rustup would then download it. A log must install nothing. A toolchain that is named and not there is written as `1.99.0 (not installed)`. Without rustup, the `rustc` of the PATH is used, if there is one.
+
+The program notes the toolchain when the build starts. It does not see a script that changes toolchain while it runs.
+
+Another language can be added: a function in `DETECTORS` in `runnerdeck/builds.py` takes the folder and the command, and gives a short text, or nothing.
+
 ## Names
 
 `--name` is the name on the screen. Without it, the program takes the command and the word after it, like `cargo test`. The branch and the commit of the folder you are in are written down too.
