@@ -221,6 +221,28 @@ def set_section(path, header, body):
         raise
 
 
+def set_computer(path, name):
+    """`computer = name` in [deck], put in, changed, or taken out when the name is empty. The rest stays as it is."""
+    with open(path) as file:
+        lines = file.read().split("\n")
+    start = next(i for i, line in enumerate(lines) if line.strip().lower() == "[deck]")
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
+    at = next((i for i in range(start + 1, end) if re.match(r"\s*computer\s*[=:]", lines[i])), None)
+    new = [f"computer = {name}"] if name else []
+    if at is not None:
+        lines[at:at + 1] = new
+    else:
+        lines[start + 1:start + 1] = new
+    shutil.copyfile(path, path + ".bak")
+    try:
+        with open(path, "w") as file:
+            file.write("\n".join(lines))
+        load(path)
+    except (ConfigError, OSError):
+        shutil.copyfile(path + ".bak", path)
+        raise
+
+
 def set_approval(path, workflows, label):
     """The [approval] section set, or taken out when there are no workflows."""
     set_section(path, "[approval]", [f"workflows = {', '.join(workflows)}", f"label = {label}"] if workflows else [])

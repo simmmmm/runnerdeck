@@ -1,6 +1,7 @@
 """The screen's loop, and what runs from the command line."""
 import locale
 import os
+import platform
 import shlex
 import shutil
 import sys
@@ -9,7 +10,7 @@ import threading
 import zipfile
 from .util import read
 from .system import WINDOWS
-from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, runner_rows, set_section
+from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, runner_rows, set_computer, set_section
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
 from .github import Queue, act_on_run, approve, close, row_of
 from .machines import Pc, RemoteMac, build_machines, probe
@@ -138,6 +139,24 @@ def show(window, cfg, runners, queue, machine, pcs=()):
         else:
             note = "Runners here need a [local] section in the config"
 
+    def rename_computer():
+        """What this computer is called on the screen: asked, kept in [deck] computer, shown at once."""
+        nonlocal dialog
+
+        def rename(value):
+            value = value.strip()
+            try:
+                set_computer(default_path(), value)
+                cfg.computer = load().computer
+                for pc in pcs:
+                    if getattr(pc, "host", None) is None and getattr(pc, "kind", "linux") != "macos":
+                        pc.name = cfg.computer or platform.node().split(".")[0][:12] or "here"
+                queue.said = f"This computer is called {cfg.computer or 'by its own name'} now"
+            except (ConfigError, OSError, ValueError) as err:
+                queue.said = f"Not changed: {err}"
+        dialog = {"title": "Name of this computer", "words": "Up to 12 characters. Empty: its own name.",
+                  "field": cfg.computer, "then": rename}
+
     def builds_help():
         nonlocal note
         note = "Record a build that is not on GitHub:  runnerdeck run --name tests -- <command>   (docs/builds.md)"
@@ -150,7 +169,8 @@ def show(window, cfg, runners, queue, machine, pcs=()):
         """Everything that can be changed, in one list. Each is also on a key of its own."""
         items = (("Add a runner on this machine  (n)", runner_dialog), ("Repositories: add or take out", repositories),
                  ("Workflows that wait for your yes  (w)", approval), ("Add a computer to watch  (h)", computer),
-                 ("Remove a computer", remove_computer), ("Where is the config file?", config_file),
+                 ("Remove a computer", remove_computer), ("Name of this computer", rename_computer),
+                 ("Where is the config file?", config_file),
                  ("How to record a build that is not on GitHub", builds_help))
         chosen = menu(window, "Settings", [label for label, _ in items])
         if chosen is not None:

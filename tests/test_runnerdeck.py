@@ -1504,6 +1504,24 @@ except configmod.ConfigError:
     pass
 __import__("shutil").rmtree(_dir, ignore_errors=True)
 
+# set_computer puts the name in [deck], changes it, takes it out; comments stay
+_dir = tempfile.mkdtemp()
+_ini = os.path.join(_dir, "c.ini")
+open(_ini, "w").write("# mine\n[deck]\nrepos = a/b\n\n[local]\nservice = numa-runner.service\n")
+configmod.set_computer(_ini, "linux")
+assert configmod.load(_ini).computer == "linux" and "# mine" in open(_ini).read()
+configmod.set_computer(_ini, "box")
+assert configmod.load(_ini).computer == "box" and open(_ini).read().count("computer") == 1
+configmod.set_computer(_ini, "")
+assert configmod.load(_ini).computer == "" and "computer" not in open(_ini).read()
+try:
+    configmod.set_computer(_ini, "far too long a name for it")
+    raise SystemExit("accepted")
+except configmod.ConfigError:
+    pass
+assert configmod.load(_ini).computer == ""
+__import__("shutil").rmtree(_dir, ignore_errors=True)
+
 # a computer that does not answer says why, in words, and a Mac's answer must be the program's own
 for said, word in (("ssh: connect to host 10.0.0.9 port 22: Connection refused", "SSH server"), ("", "did not connect")):
     assert word in machines.explain_ssh(said, "me@mac"), said

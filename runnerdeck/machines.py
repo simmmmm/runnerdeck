@@ -547,7 +547,9 @@ class ServiceRunner:
     """A runner that is a systemd service on a Linux machine: read as a folder runner is."""
 
     def __init__(self, pc):
-        self.pc, self.name = pc, pc.service.replace(".service", "")[:8] or "runner"
+        # Six characters is what the column has: "numa-runner.service" is "numa".
+        base = re.sub(r"[-_.]?(runner|actions)$", "", pc.service.replace(".service", ""))
+        self.pc, self.name = pc, (base or "runner")[:6]
 
     def state(self):
         return self.pc.state()
