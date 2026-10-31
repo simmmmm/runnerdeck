@@ -169,6 +169,8 @@ fi
 for h in "$SYS"/class/hwmon/hwmon*; do
     [ "$(cat "$h/name" 2>/dev/null)" = k10temp ] && echo "cpu_temp $(cat "$h/temp1_input" 2>/dev/null)"
 done
+# What keeps the processor busy: the programs with the most of it, each as its share of the whole processor.
+ps -eo pcpu=,comm= 2>/dev/null | awk -v n="$(nproc)" '$2 != "ps" && $2 != "awk" && $2 != "sh" && $2 != "sleep" {a[$2] += $1} END {for (k in a) printf "top %.0f %s\n", a[k] / n, k}' | sort -k2 -nr | head -n 3
 echo "now $(date +%s)"
 ls -t "${RUNNERDECK_DATA:-$HOME/.local/share/runnerdeck}"/builds/*.json 2>/dev/null | head -n 8 | while IFS= read -r f; do
     echo "build $(stat -c %Y "$f" 2>/dev/null) $(tr -d '\n' < "$f")"
@@ -231,13 +233,15 @@ def parse_pc(said):
     """A machine's answer as numbers and names. A key it did not give is left out,
     and so is a number that is not one."""
     head, _, log = said.partition("\nlog\n")
-    got, stats, built = {}, [], []
+    got, stats, built, tops = {}, [], [], []
     for line in head.splitlines():
         key, _, value = line.partition(" ")
         if key == "stat":
             stats.append(value.split()[1:])
         elif key == "build":
             built.append(value)
+        elif key == "top":
+            tops.append(value)
         else:
             got[key] = value.strip()
 
@@ -264,6 +268,11 @@ def parse_pc(said):
     used, size = number("vram_used", 2**30), number("vram_total", 2**30)
     now["vram"] = (used, size) if used is not None and size else None
     now["log"] = [clean(line) for line in log.splitlines()]
+    now["top"] = []
+    for value in tops:
+        share, _, name = value.partition(" ")
+        if share.isdigit() and name.strip() and int(share) >= 1:
+            now["top"].append((clean(name.strip())[:14], int(share)))
     # The builds that were recorded there (runnerdeck run), judged by the clock of that machine.
     clock = number("now") or time.time()
     now["builds"] = []

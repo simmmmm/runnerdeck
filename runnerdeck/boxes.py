@@ -115,20 +115,16 @@ def pc_box(canvas, y, width, pc):
     canvas.put(row, x + 9, f"CPU {cpu_temp:.0f} °C" if cpu_temp is not None else "CPU —", hot(cpu_temp, 80, 90))
     canvas.put(row, x + 21, f"GPU {gpu_temp:.0f} °C" if gpu_temp is not None else "GPU —", hot(gpu_temp, 75, 85))
     row += 1
-    canvas.put(row, x, "Card", "label")
-    power, vram = now.get("gpu_power"), now.get("vram")
-    canvas.put(row, x + 9, f"{power:.0f} W" if power is not None else "—", "strong" if power is not None else "dim")
-    if vram:
-        canvas.put(row, x + 16, f"VRAM {vram[0]:.1f} / {vram[1]:.0f} GB", "plain")
+    canvas.put(row, x, "VRAM", "label")
+    vram = now.get("vram")
+    canvas.put(row, x + 9, f"{vram[0]:.1f} / {vram[1]:.0f} GB" if vram else "—", "plain" if vram else "dim")
     row += 1
-    if not pc.service:
-        return y + height
-    state, job, since, last = pc.state()
-    canvas.put(row, x, "Runner", "label")
-    words = f"Running {job}" if state == "running" else {**WORDS, "unreachable": "Unreachable"}.get(state, state)
-    canvas.put(row, x + 9, MARKS.get(state, "·"), "good" if state == "running" else "dim")
-    canvas.put(row, x + 11, words[:max(0, width - x - 24)], "strong" if state == "running" else "dim" if state in ("stopped", "unreachable") else "plain")
-    right(canvas, row, width, ago(since) if state in ("running", "listening") else "", "label")
+    # The card's power is no use to anyone here. What keeps the processor busy is: a runner's job is in
+    # the box below, but a build that was started by hand, or an editor, is only here.
+    canvas.put(row, x, "Busy", "label")
+    top = now.get("top") or []
+    text = "   ".join(f"{name} {share} %" for name, share in top)
+    canvas.put(row, x + 9, text[:max(0, width - x - 12)] if text else "nothing much", "plain" if text else "dim")
     return y + height
 
 

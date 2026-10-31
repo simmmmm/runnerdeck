@@ -1522,6 +1522,9 @@ except configmod.ConfigError:
 assert configmod.load(_ini).computer == ""
 __import__("shutil").rmtree(_dir, ignore_errors=True)
 
+# what keeps the processor busy: programs with a share of at least 1 %
+assert machines.parse_pc("top 40 rustc\ntop 0 x\ntop 3 cargo\n")["top"] == [("rustc", 40), ("cargo", 3)]
+
 # a computer that does not answer says why, in words, and a Mac's answer must be the program's own
 for said, word in (("ssh: connect to host 10.0.0.9 port 22: Connection refused", "SSH server"), ("", "did not connect")):
     assert word in machines.explain_ssh(said, "me@mac"), said
