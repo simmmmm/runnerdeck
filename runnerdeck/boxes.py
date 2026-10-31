@@ -271,9 +271,13 @@ def requests_box(canvas, y, width, requests, picked=None, working=None, labels=N
             canvas.put(line, 1, "▸" + " " * (width - 3), "picked")
         else:
             canvas.put(line, 2, "?", "warm")
-        canvas.put(line, 4, request["workflow"][:12], "picked" if chosen else "strong")
-        canvas.put(line, 17, request["branch"][:24], "picked" if chosen else "dim")
-        canvas.put(line, 42, request["sha"][:7], "picked" if chosen else "dim")
+        if request.get("kind"):
+            # A kind of the config's own: what the issue said, as it is.
+            canvas.put(line, 4, request["what"][:44], "picked" if chosen else "strong")
+        else:
+            canvas.put(line, 4, request["workflow"][:12], "picked" if chosen else "strong")
+            canvas.put(line, 17, request["branch"][:24], "picked" if chosen else "dim")
+            canvas.put(line, 42, request["sha"][:7], "picked" if chosen else "dim")
         words = f"{doing}…" if doing else request["note"]
         at = 50
         if labels:
@@ -301,6 +305,16 @@ def fit_tabs(sizes, shown, room):
             used += 1 + sizes[first]
             grew = True
     return first, last
+
+
+def with_remote(runners, pcs):
+    """The runners whose log can be read: those of this machine, then those that are read over ssh or are
+    a service. One list, for the tabs of the log and the keys that move between them."""
+    more = []
+    for pc in pcs:
+        if pc.reachable() and hasattr(pc, "runner_list"):
+            more += pc.runner_list()
+    return list(runners) + more
 
 
 def log_box(canvas, y, width, height, runners, shown):
@@ -407,8 +421,9 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
         y += 3
     if queue.runs and room >= 5:
         y = github_box(canvas, y, width, queue.runs[:max(1, min(len(queue.runs), room - 7))], cfg.repos, picked, queue.working)
-    if runners and height - 1 - y >= 3:
-        log_box(canvas, y, width, height - 1 - y, runners, shown)
+    logs = with_remote(runners, pcs)
+    if logs and height - 1 - y >= 3:
+        log_box(canvas, y, width, height - 1 - y, logs, shown % len(logs))
     picking = (("field" if "field" in dialog else "dialog") if dialog else None if picked is None
                else "request" if picked < 0 else "run")
     if dialog:

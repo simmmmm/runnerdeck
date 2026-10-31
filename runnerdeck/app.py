@@ -13,9 +13,10 @@ from .system import WINDOWS
 from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, runner_rows, set_computer, set_section
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
 from .github import Queue, act_on_run, approve, close, row_of
+from .update import update
 from .machines import Pc, RemoteMac, build_machines, probe
 from .terminal import ConsoleTerminal, CursesTerminal, ENTER, Grid, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
-from .boxes import paint
+from .boxes import paint, with_remote
 from .builds import run_recorded
 from .setup import Wizard, menu, run as run_setup
 
@@ -43,7 +44,7 @@ def show(window, cfg, runners, queue, machine, pcs=()):
             note = f"Already {queue.working[row]}"
             return None
         if row < 0:
-            what = f"{item['workflow']} from {item['branch']} at {item['sha'][:7]}"
+            what = item["what"]
             if letter == "a":
                 def start():
                     said, closed = approve(item)
@@ -54,7 +55,7 @@ def show(window, cfg, runners, queue, machine, pcs=()):
             def decline():
                 close(item, "Declined in runner.")
                 queue.over.add((item["repo"], item["number"]))
-                return f"Declined {item['branch']} at {item['sha'][:7]}", True
+                return f"Declined {what}", True
             return ask(item["workflow"], f"Decline {what}?", "Decline", "Keep it", lambda: queue.carry_out(row, "declining", decline))
         what = f"{item.get('workflowName')} {item.get('headBranch')} {item.get('headSha', '')[:7]}"
         done = item.get("status") == "completed"
@@ -72,7 +73,7 @@ def show(window, cfg, runners, queue, machine, pcs=()):
         if wizard.saved:
             try:
                 fresh = load()
-                cfg.approval, cfg.asked = fresh.approval, fresh.asked
+                cfg.approval, cfg.asked, cfg.kinds = fresh.approval, fresh.asked, fresh.kinds
                 queue.said = "Saved. Waiting for your yes: " + (", ".join(cfg.approval["workflows"]) or "no workflow")
             except (ConfigError, ValueError) as err:
                 queue.said = f"The file is saved, but cannot be read: {err}"
@@ -157,6 +158,10 @@ def show(window, cfg, runners, queue, machine, pcs=()):
         dialog = {"title": "Name of this computer", "words": "Up to 12 characters. Empty: its own name.",
                   "field": cfg.computer, "then": rename}
 
+    def update_here():
+        nonlocal note
+        note = update()[1]
+
     def builds_help():
         nonlocal note
         note = "Record a build that is not on GitHub:  runnerdeck run --name tests -- <command>   (docs/builds.md)"
@@ -170,6 +175,7 @@ def show(window, cfg, runners, queue, machine, pcs=()):
         items = (("Add a runner on this machine  (n)", runner_dialog), ("Repositories: add or take out", repositories),
                  ("Workflows that wait for your yes  (w)", approval), ("Add a computer to watch  (h)", computer),
                  ("Remove a computer", remove_computer), ("Name of this computer", rename_computer),
+                 ("Update runnerdeck", update_here),
                  ("Where is the config file?", config_file),
                  ("How to record a build that is not on GitHub", builds_help))
         chosen = menu(window, "Settings", [label for label, _ in items])
@@ -256,10 +262,10 @@ def show(window, cfg, runners, queue, machine, pcs=()):
                 dialog = ask("Stop", f"Stop them? {', '.join(busy)} would fail its job", "Stop", "Keep running", stop)
             else:
                 stop()
-        elif key in (9, K_RIGHT) and runners:
-            shown = (shown + 1) % len(runners)
-        elif key == K_LEFT and runners:
-            shown = (shown - 1) % len(runners)
+        elif key in (9, K_RIGHT) and with_remote(runners, pcs):
+            shown = (shown + 1) % len(with_remote(runners, pcs))
+        elif key == K_LEFT and with_remote(runners, pcs):
+            shown = (shown - 1) % len(with_remote(runners, pcs))
         elif key == ord("s"):
             window.leave()
             start_all(cfg, runners)
@@ -392,6 +398,10 @@ def main(args=None):
     if args[:1] == ["run"]:
         # A command that is run and recorded; no config is needed, and its own exit code is ours.
         sys.exit(run_recorded(args[1:]))
+    if "--update" in args:
+        done, said = update()
+        print(said)
+        sys.exit(0 if done else 1)
     if "--probe" in args:
         at = args.index("--probe") + 1
         sys.exit(probe(args[at] if at < len(args) else "", args[at + 1] if at + 1 < len(args) else "linux"))

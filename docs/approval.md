@@ -39,3 +39,41 @@ The program starts the workflow only in these cases:
 An issue can only ask. It cannot start a workflow.
 
 The program takes only three things from the title: the name of the workflow, the name of the branch, and the commit. The workflow must be in the list in the config file.
+
+## Other kinds of request: `[request NAME]`
+
+`[approval]` knows one shape of title: `Deploy: <branch> <commit>`. For a workflow that takes inputs, or a title of another shape, add a section for it. There can be any number. This is data: no change in the program is needed.
+
+```ini
+[request publish]
+label = publish-request
+workflow = Publish
+title = Publish: {mode} {version} {sha}
+mode = linux|apple|home
+version = version
+sha = sha
+ref = main
+input sha = {sha}
+input mode = {mode}
+```
+
+An issue with the label `publish-request` and the title `Publish: linux 0.48.0 a0d3a70` waits on the screen. When you say yes, the program runs:
+
+```
+gh workflow run Publish --repo owner/name --ref main -f sha=a0d3a70 -f mode=linux
+```
+
+What an issue can say stays small:
+
+- The workflow, the branch (`ref`) and the names of the inputs come from the config file, never from the issue.
+- Each `{field}` of the title is one of: `sha`, `version`, `branch`, or a list of plain words (`linux|apple|home`). No other pattern is possible, so a title cannot carry more than a word, a version, a branch or a commit.
+- The title must match as a whole. Anything extra makes it no request at all.
+- Each input is a field of the title or a plain word.
+- As with `[approval]`: when there is a `ref` and a `sha`, the branch must still be at that commit, and a run of that commit that is on its way is not started again.
+- An issue can only ask. You say yes.
+
+A section that is wrong makes the config invalid, and the program says which line.
+
+## Update the program
+
+`runnerdeck --update` (or *Update runnerdeck* in the settings) brings the clone it runs from up to date. It only fast-forwards `main`. It does nothing when the clone is on another branch, has changes of your own, or has commits of its own. The runners are other programs and keep running. Start runnerdeck again to use the new version.

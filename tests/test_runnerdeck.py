@@ -1525,6 +1525,79 @@ __import__("shutil").rmtree(_dir, ignore_errors=True)
 # what keeps the processor busy: programs with a share of at least 1 %
 assert machines.parse_pc("top 40 rustc\ntop 0 x\ntop 3 cargo\n")["top"] == [("rustc", 40), ("cargo", 3)]
 
+# kinds of request as data: [request NAME]
+_dir = tempfile.mkdtemp()
+_ini = os.path.join(_dir, "c.ini")
+_head = "[deck]\nrepos = a/b\n\n[request publish]\nlabel = publish-request\nworkflow = Publish\ntitle = Publish: {mode} {version} {sha}\n"
+_body = "mode = linux|apple|home\nversion = version\nsha = sha\nref = main\ninput sha = {sha}\ninput mode = {mode}\n"
+open(_ini, "w").write(_head + _body)
+_cfg = configmod.load(_ini)
+_ask = lambda title, label=None: github.asked(_cfg, {"number": 51, "title": title, "body": "why\nmore"}, "a/b", 0, label)
+_got = _ask("Publish: linux 0.48.0 a0d3a70")
+assert _got["workflow"] == "Publish" and _got["ref"] == "main" and _got["sha"] == "a0d3a70" and _got["note"] == "why"
+assert _got["inputs"] == {"sha": "a0d3a70", "mode": "linux"} and _got["kind"] == "publish" and _ask("Publish: apple 1.2 abcdef1")
+assert _ask("Publish: linux 0.48.0 a0d3a70", "other-label") is None and _ask("Publish: linux 0.48.0 a0d3a70", "publish-request")
+for _title in ("Publish: windows 0.48.0 a0d3a70", "Publish: linux 0.48.0 a0d3a70 --repo x/y", "Publish: linux 0.48.0 a0d3a7;ls",
+               "publish: linux 0.48.0 a0d3a70", "Publish: linux 0.48.0 A0D3A70", "Publish: linux $(x) a0d3a70", "Publish: linux 0.48.0 a0d3a70\nx"):
+    assert _ask(_title) is None, _title
+# what is started: only the workflow of the config, its ref, and the inputs named there
+_run, _calls = github.subprocess.run, []
+def _gh(command, **kw):
+    _calls.append(command)
+    out = "a0d3a70ffff" if "branches" in " ".join(command) else "[]"
+    return types.SimpleNamespace(returncode=0, stdout=out, stderr="")
+github.subprocess.run = _gh
+try:
+    _said, _over = github.approve(_got)
+finally:
+    github.subprocess.run = _run
+_start = next(c for c in _calls if c[:3] == ["gh", "workflow", "run"])
+assert _over and _start == ["gh", "workflow", "run", "Publish", "--repo", "a/b", "--ref", "main", "-f", "sha=a0d3a70", "-f", "mode=linux"], _start
+# a kind that is wrong is refused with a word about it
+for _text in (_head.replace("{mode} ", "{mode} {mode} ") + _body, _head + _body.replace("linux|apple|home", "li nux|a;b"),
+              _head + _body.replace("input sha = {sha}", "input sha = {nothing}"), _head + _body.replace("ref = main", "ref = ma in; x"),
+              _head.replace("workflow = Publish", "workflow = ") + _body, _head.replace("{sha}", "sha") + _body):
+    open(_ini, "w").write(_text)
+    try:
+        configmod.load(_ini)
+        raise SystemExit("a wrong kind of request was accepted: " + _text)
+    except configmod.ConfigError:
+        pass
+__import__("shutil").rmtree(_dir, ignore_errors=True)
+
+# updating itself: a fast-forward of main, and nothing else
+from runnerdeck import update as updatemod
+_base = tempfile.mkdtemp()
+def _git(where, *args):
+    got = subprocess.run(["git", "-C", where, "-c", "user.name=t", "-c", "user.email=t@t", *args], capture_output=True, text=True)
+    assert got.returncode == 0, (args, got.stderr)
+    return got.stdout.strip()
+_origin, _clone, _other = (os.path.join(_base, n) for n in ("origin", "clone", "other"))
+subprocess.run(["git", "init", "-q", "-b", "main", _origin], check=True)
+open(os.path.join(_origin, "a"), "w").write("1")
+_git(_origin, "add", "."); _git(_origin, "commit", "-qm", "one")
+_git(_origin, "config", "receive.denyCurrentBranch", "ignore")
+subprocess.run(["git", "clone", "-q", _origin, _clone], check=True)
+subprocess.run(["git", "clone", "-q", _origin, _other], check=True)
+updatemod.ROOT = _clone
+assert updatemod.update() == (True, "Already the newest (%s)." % _git(_clone, "rev-parse", "--short", "HEAD"))
+open(os.path.join(_other, "a"), "w").write("2")
+_git(_other, "commit", "-qam", "two"); _git(_other, "push", "-q", "origin", "main")
+_ok, _said = updatemod.update()
+assert _ok and "Updated" in _said and "runners were not touched" in _said and open(os.path.join(_clone, "a")).read() == "2", _said
+open(os.path.join(_other, "a"), "w").write("3"); _git(_other, "commit", "-qam", "three"); _git(_other, "push", "-q", "origin", "main")
+open(os.path.join(_clone, "a"), "w").write("mine")
+_ok, _said = updatemod.update()
+assert not _ok and "changes of your own" in _said and open(os.path.join(_clone, "a")).read() == "mine"
+_git(_clone, "checkout", "-q", "--", "a"); _git(_clone, "checkout", "-q", "-b", "side")
+assert not updatemod.update()[0] and "not on main" in updatemod.update()[1]
+_git(_clone, "checkout", "-q", "main"); open(os.path.join(_clone, "b"), "w").write("x"); _git(_clone, "add", "b"); _git(_clone, "commit", "-qm", "mine")
+_ok, _said = updatemod.update()
+assert not _ok and "apart" in _said and open(os.path.join(_clone, "b")).read() == "x"
+updatemod.ROOT = _base
+assert not updatemod.update()[0] and "not a clone" in updatemod.update()[1]
+__import__("shutil").rmtree(_base, ignore_errors=True)
+
 # a computer that does not answer says why, in words, and a Mac's answer must be the program's own
 for said, word in (("ssh: connect to host 10.0.0.9 port 22: Connection refused", "SSH server"), ("", "did not connect")):
     assert word in machines.explain_ssh(said, "me@mac"), said

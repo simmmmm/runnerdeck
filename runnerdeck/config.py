@@ -56,6 +56,19 @@ REFERENCE = """\
 # workflows = Deploy, Ship it
 # label = deploy-request
 #
+# [request publish]
+# Another kind of request, as data: any number of these sections. An issue with the label and a title
+# of this shape asks for the workflow. Only what is in the {fields} reaches gh, as the inputs named here.
+# label = publish-request
+# workflow = Publish
+# title = Publish: {mode} {version} {sha}
+# mode = linux|apple|home        a field is one of these words, or: sha, version, branch
+# version = version
+# sha = sha
+# ref = main                     the branch it starts from, or {branch} with a field of that name
+# input sha = {sha}              a workflow input, from a field or a plain word
+# input mode = {mode}
+#
 # [names]
 # Short names for jobs in the notifications.
 # build = Build
@@ -85,6 +98,7 @@ class Config:
         self.hosts = []
         self.approval = {"workflows": [], "label": ""}
         self.asked = None
+        self.kinds = []
         self.names = {}
         self.version = "2.338.2"
         self.keychain = ""
@@ -168,6 +182,9 @@ def configure(config):
     # a branch's name and a commit reaches `gh`.
     cfg.asked = (re.compile(r"^(%s): ([A-Za-z0-9][A-Za-z0-9._/-]*) ([0-9a-f]{7,40})$"
                             % "|".join(re.escape(name) for name in workflows)) if workflows else None)
+    for section in config.sections():
+        if section.lower().startswith("request "):
+            cfg.kinds.append(request_kind(section[8:].strip(), config[section]))
     # A job by its workflow's name: the runner's log says only the job's own.
     cfg.names = dict(config["names"]) if config.has_section("names") else {}
     first = os.path.join(cfg.local["dir"] if cfg.local else os.path.join(cfg.home, "actions-runner"), "")
@@ -181,6 +198,58 @@ def load(path=None):
     if not config.read(path):
         raise NoConfig(f"no config at {path}. Start the program in a terminal to set it up, or run: python3 -m runnerdeck --init")
     return configure(config)
+
+
+# What a field of a request's title may be. Never a pattern from the file itself: only these, or a list of
+# plain words, so that nothing an issue says can reach further than a word, a version, a branch or a commit.
+FIELD_PATTERNS = {"sha": r"[0-9a-f]{7,40}", "version": r"[0-9]+(?:\.[0-9]+){1,3}(?:-[A-Za-z0-9.]+)?",
+                  "branch": r"[A-Za-z0-9][A-Za-z0-9._/-]*"}
+PLAIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def request_kind(name, section):
+    """A [request NAME] section as a kind of request: the label, the workflow, a title that is a pattern made of
+    plain text and {fields}, and the inputs that the workflow gets, each from a field or a plain word."""
+    def bad(why):
+        return ConfigError(f"[request {name}]: {why}")
+    if not WORD.match(name) or " " in name:
+        raise ConfigError(f"[request NAME]: a name of letters and digits, not {name!r}")
+    label, workflow, title = (section.get(key, "").strip() for key in ("label", "workflow", "title"))
+    if not WORD.match(label) or not WORD.match(workflow) or not title:
+        raise bad("label = name, workflow = Name and title = Text: {field} are needed")
+    pieces = re.split(r"\{([a-z][a-z0-9_]*)\}", title)
+    names = pieces[1::2]
+    if not names or len(set(names)) != len(names):
+        raise bad("the title needs each of its {fields} once, and at least one")
+    regex, fields = "", {}
+    for i, piece in enumerate(pieces):
+        if i % 2 == 0:
+            regex += re.escape(piece)
+            continue
+        said = section.get(piece, "").strip()
+        words = [word.strip() for word in said.split("|")]
+        if said in FIELD_PATTERNS:
+            pattern = FIELD_PATTERNS[said]
+        elif said and all(PLAIN.match(word) for word in words):
+            pattern = "|".join(re.escape(word) for word in words)
+        else:
+            raise bad(f"{piece} = sha, version, branch, or words like linux|apple|home")
+        fields[piece] = said
+        regex += f"(?P<{piece}>{pattern})"
+    inputs = {}
+    for key, value in section.items():
+        if not key.startswith("input "):
+            continue
+        input_name, value = key[6:].strip(), value.strip()
+        field = re.fullmatch(r"\{([a-z][a-z0-9_]*)\}", value)
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", input_name) or not (field and field[1] in fields or PLAIN.match(value)):
+            raise bad(f"{key} = a {{field}} of the title, or a plain word")
+        inputs[input_name] = value
+    ref = section.get("ref", "").strip()
+    if ref and not (re.fullmatch(r"\{branch\}", ref) and fields.get("branch") or PLAIN.match(ref)):
+        raise bad("ref = a plain branch name, or {branch} when the title has a branch field")
+    return {"name": name, "label": label, "workflow": workflow, "ref": ref, "inputs": inputs, "fields": fields,
+            "title": re.compile("^" + regex + "$")}
 
 
 def set_section(path, header, body):

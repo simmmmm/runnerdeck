@@ -570,6 +570,10 @@ class ServiceRunner:
     def toolchain(self):
         return self.pc.now.get("rust", "") if self.pc.reachable() else ""
 
+    def tail(self):
+        """The journal of the service, as the machine last sent it."""
+        return self.pc.now.get("log", []) if self.pc.reachable() else []
+
 
 class RemoteRunner:
     """A runner on another computer: read, never started or stopped from here."""
@@ -586,6 +590,10 @@ class RemoteRunner:
         if not entry["running"]:
             return "stopped", "", None, ""
         return said_by(entry["log"])
+
+    def tail(self):
+        entry = next((item for item in self.mac.now.get("runners", []) if item["name"] == self.name), None)
+        return entry["log"] if self.mac.reachable() and entry else []
 
 
 class RemoteMac(Pc):

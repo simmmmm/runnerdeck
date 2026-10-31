@@ -25,6 +25,7 @@
 - The first time, it asks a few questions on the screen and writes the config file for you. It finds runners that are set up already.
 - It shows builds that are not on GitHub too, when you start them with `runnerdeck run -- <command>`. For a Rust project it says which compiler was used. See [Builds](docs/builds.md).
 - You can add a new runner. You only paste the token.
+- You can describe other kinds of request as data (a title pattern, a workflow, its inputs), and update the program with `runnerdeck --update`. See [Approval](docs/approval.md).
 - You can keep a workflow behind your approval, and change which ones later. Approval is a request that you answer on the screen. It does not lock the workflow: see [Approval](docs/approval.md).
 
 ## What you need

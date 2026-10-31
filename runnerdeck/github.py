@@ -7,15 +7,31 @@ import time
 from .util import STAMP, moment
 
 
-def asked(cfg, issue, repo="", index=0):
+def asked(cfg, issue, repo="", index=0, label=None):
     """The request an issue makes, if its title is one: nothing from it but
     a workflow's name, a branch's name and a commit reaches `gh`. Its row is
-    a negative number no run's can be, and none of another repository's."""
-    found = cfg.asked.match(issue.get("title", "").strip()) if cfg.asked else None
-    if not found:
-        return None
-    return {"number": issue["number"], "repo": repo, "row": -(index * 10**6 + issue["number"]), "workflow": found[1],
-            "branch": found[2], "sha": found[3], "note": (issue.get("body") or "").split("\n")[0]}
+    a negative number no run's can be, and none of another repository's.
+    With a `label`, only the kinds of that label are tried."""
+    title = issue.get("title", "").strip()
+    row = -(index * 10**6 + issue["number"])
+    note = (issue.get("body") or "").split("\n")[0]
+    found = cfg.asked.match(title) if cfg.asked and label in (None, cfg.approval["label"]) else None
+    if found:
+        return {"number": issue["number"], "repo": repo, "row": row, "workflow": found[1], "branch": found[2],
+                "sha": found[3], "note": note, "kind": "", "ref": found[2], "inputs": {},
+                "what": f"{found[1]} from {found[2]} at {found[3][:7]}"}
+    for kind in getattr(cfg, "kinds", ()):
+        found = kind["title"].match(title) if label in (None, kind["label"]) else None
+        if not found:
+            continue
+        values = found.groupdict()
+        ref = values["branch"] if kind["ref"] == "{branch}" else kind["ref"]
+        # The inputs that the workflow gets: each a field of the title, which has been checked, or a plain word.
+        inputs = {key: values.get(value[1:-1], value) if value.startswith("{") else value for key, value in kind["inputs"].items()}
+        return {"number": issue["number"], "repo": repo, "row": row, "workflow": kind["workflow"], "branch": ref or "",
+                "sha": values.get("sha", ""), "note": note, "kind": kind["name"], "ref": ref, "inputs": inputs,
+                "what": title[:60]}
+    return None
 
 
 def still_at(repo, branch, sha):
@@ -45,12 +61,12 @@ def row_of(item):
 def approve(request):
     """Starts the workflow asked for; what to say of it, and whether the
     request is over."""
-    repo, workflow, branch, sha = request["repo"], request["workflow"], request["branch"], request["sha"]
-    if not still_at(repo, branch, sha):
+    repo, workflow, branch, sha = request["repo"], request["workflow"], request["ref"], request["sha"]
+    if branch and sha and not still_at(repo, branch, sha):
         return f"{branch} is no longer at {sha[:7]}: nothing started", False
     # One each: a run started by hand, or the list of requests lagging behind
     # a close, and a key pressed again queued the same commit again.
-    runs = subprocess.run(["gh", "run", "list", "--repo", repo, "--workflow", workflow, "--branch", branch,
+    runs = subprocess.run(["gh", "run", "list", "--repo", repo, "--workflow", workflow, *(["--branch", branch] if branch else []),
                            "--limit", "10", "--json", "status,headSha"], capture_output=True, text=True, timeout=15)
     try:
         listed = json.loads(runs.stdout) if runs.returncode == 0 else None
@@ -58,15 +74,20 @@ def approve(request):
         listed = None
     if listed is None:
         return "GitHub did not say what is running: nothing started", False
-    if any(run["headSha"].startswith(sha) and run["status"] != "completed" for run in listed):
+    if sha and any(run["headSha"].startswith(sha) and run["status"] != "completed" for run in listed):
         close(request, f"A {workflow} of this commit is already on its way.")
         return f"{sha[:7]} is already on its way: nothing started", True
-    started = subprocess.run(["gh", "workflow", "run", workflow, "--repo", repo, "--ref", branch],
-                             capture_output=True, text=True, timeout=15)
+    # The command is made of what the config names and of values that were checked against a pattern.
+    command = ["gh", "workflow", "run", workflow, "--repo", repo]
+    if branch:
+        command += ["--ref", branch]
+    for key, value in request["inputs"].items():
+        command += ["-f", f"{key}={value}"]
+    started = subprocess.run(command, capture_output=True, text=True, timeout=15)
     if started.returncode:
         return f"{workflow} did not start: {started.stderr.strip()}", False
     close(request, f"Approved in runner; {workflow} started.")
-    return f"{workflow} started from {branch} at {sha[:7]}", True
+    return f"{request['what']}: {workflow} started", True
 
 
 def close(request, words):
@@ -102,20 +123,29 @@ class Queue:
 
     def fetch_requests(self):
         found = []
-        for index, repo in enumerate(self.cfg.repos if self.cfg.approval["label"] else []):
-            got = subprocess.run(["gh", "issue", "list", "--repo", repo, "--label", self.cfg.approval["label"], "--state", "open",
-                                  "--json", "number,title,body"], capture_output=True, text=True)
-            try:
-                issues = json.loads(got.stdout) if got.returncode == 0 else None
-            except ValueError:
-                issues = None
-            if issues is None:
+        labels = list(dict.fromkeys(([self.cfg.approval["label"]] if self.cfg.approval["label"] else [])
+                                    + [kind["label"] for kind in self.cfg.kinds]))
+        for index, repo in enumerate(self.cfg.repos):
+            seen, told = set(), True
+            for label in labels:
+                got = subprocess.run(["gh", "issue", "list", "--repo", repo, "--label", label, "--state", "open",
+                                      "--json", "number,title,body"], capture_output=True, text=True)
+                try:
+                    issues = json.loads(got.stdout) if got.returncode == 0 else None
+                except ValueError:
+                    issues = None
+                if issues is None:
+                    told = False
+                    continue
+                # The oldest first: the order they were asked in.
+                for issue in reversed(issues):
+                    request = asked(self.cfg, issue, repo, index, label)
+                    if request and issue["number"] not in seen and (repo, issue["number"]) not in self.over:
+                        seen.add(issue["number"])
+                        found.append(request)
+            if not told:
                 # Not told this round: what was known of it stays.
-                found += [request for request in self.requests if request["repo"] == repo]
-                continue
-            # The oldest first: the order they were asked in.
-            found += [request for request in (asked(self.cfg, issue, repo, index) for issue in reversed(issues))
-                      if request and (repo, request["number"]) not in self.over]
+                found += [request for request in self.requests if request["repo"] == repo and request["number"] not in seen]
         self.requests = found
 
     def fetch(self):

@@ -6,6 +6,7 @@ the runs they work on, on one btop-style screen in the terminal.
     runnerdeck --setup     ask the questions again (the old config is kept as config.ini.bak)
     runnerdeck --init      write an example config file, to edit by hand
     runnerdeck --status    the screen once, as text; starts nothing
+    runnerdeck --update   bring this clone up to date (a fast-forward of main; the runners are not touched)
     runnerdeck --probe USER@HOST [linux|macos]   what a computer sends back, raw (for an empty box)
     runnerdeck run [--name N] -- COMMAND   run a command as it is, and keep a record of it for the screen
     runnerdeck --install   copy this to ~/runnerdeck.pyz, and `runnerdeck` in your shell
