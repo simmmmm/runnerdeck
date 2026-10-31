@@ -112,6 +112,16 @@ build = Build
 check = CI
 ```
 
+## Reading another computer: the key
+
+The program reads another computer with ssh, with a key and never a password. Once, from the computer that runs the program:
+
+1. `ssh user@host`. Answer `yes` when it asks about the host, then `exit`.
+2. If it asks for a password: you have no key on the other computer yet. Make one if you have none (`ssh-keygen -t ed25519`, Enter at every question), then `ssh-copy-id user@host`.
+3. `ssh -o BatchMode=yes user@host echo ok` must say `ok` without asking anything.
+
+When a computer does not answer, the head of the screen says why. `runnerdeck --probe user@host [linux|macos]` shows what it sent back, raw.
+
 ## Which machines the program can read
 
 | Machine | How |

@@ -1,5 +1,6 @@
 """What a machine is doing: a Mac through its own tools, a Linux machine (here or over ssh) through one script, Windows through the system's counters."""
 import ctypes
+import glob
 import inspect
 import json
 import os
@@ -344,7 +345,10 @@ def explain_ssh(stderr, host):
     if "connection refused" in said:
         return "It refuses the connection. Its SSH server is probably off. On Linux: sudo systemctl enable --now sshd"
     if "permission denied" in said:
-        return f"It answers, but does not accept your key. Add it once: ssh-copy-id {host}"
+        # The one thing runnerdeck cannot do for a person: a password is only typed to ssh itself, once.
+        keys = glob.glob(os.path.expanduser("~/.ssh/id_*.pub"))
+        first = "" if keys else "You have no key yet. Make one (Enter at every question): ssh-keygen -t ed25519   Then "
+        return f"It answers, but does not accept a key. {first}add yours once, with the password of {host}: ssh-copy-id {host}"
     if "could not resolve" in said or "name or service not known" in said:
         return "That name is not known. Try the IP address."
     if "timed out" in said or "no route to host" in said or "unreachable" in said:
