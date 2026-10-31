@@ -10,7 +10,7 @@ import sys
 import textwrap
 import threading
 import time
-from .config import ConfigError, HOST, REFERENCE, SLUG, WORD, configure, default_path, set_approval, set_host, set_section
+from .config import ConfigError, FOLDER, HOST, REFERENCE, SLUG, WORD, configure, default_path, set_approval, set_host, set_section
 from .runners import Runner, TOKEN, find_runners, gh_token, plan_of, set_up
 from .terminal import K_BACKSPACE, K_DOWN, K_RESIZE, K_UP, Screen, colours, frame
 
@@ -26,6 +26,10 @@ STEPS = {
     "other": ("yesno", "Another machine"),
     "ssh": ("text", "SSH address"),
     "service": ("text", "Runner service"),
+    "kind": ("text", "Linux or macOS"),
+    "rname": ("text", "Name of its runners"),
+    "rdir": ("text", "Folder of its runners"),
+    "rcount": ("text", "Its runners"),
     "hostname": ("text", "Name"),
     "approval": ("yesno", "Approval"),
     "workflows": ("text", "Workflows"),
@@ -157,7 +161,8 @@ class Wizard:
         self.path = path or default_path()
         name = re.sub(r"[^A-Za-z0-9_-]", "", platform.node().split(".")[0].lower()) or "box"
         self.answers = {"repos": [], "count": 0, "name": name, "dir": "~/actions-runner", "local_repo": "", "token": "",
-                        "other": False, "ssh": "", "host_name": "pc", "service": "", "approval": False,
+                        "other": False, "ssh": "", "host_name": "pc", "service": "", "host_kind": "linux",
+                        "rname": "mac", "rdir": "~/actions-runner", "rcount": 0, "approval": False,
                         "workflows": [], "label": "", "command": True}
         self.answers.update(seed or {})
         self.step, self.history, self.typed = start, [], dict(typed or {})
@@ -224,7 +229,8 @@ class Wizard:
             if self.mode == "repos":
                 set_section(self.path, "[deck]", ["repos = " + ", ".join(a["repos"])])
             elif self.mode == "host":
-                set_host(self.path, a["host_name"], a["ssh"], a["service"])
+                set_host(self.path, a["host_name"], a["ssh"], a["service"], a["host_kind"],
+                         {"name": a["rname"], "dir": a["rdir"], "count": a["rcount"]})
             else:
                 set_approval(self.path, a["workflows"], a["label"])
             self.saved = True
@@ -261,7 +267,7 @@ class Wizard:
 
     def store(self, step, value):
         """An answer, under its name in the answers (the name of a computer is kept as host_name)."""
-        self.answers["host_name" if step == "hostname" else step] = value
+        self.answers[{"hostname": "host_name", "kind": "host_kind"}.get(step, step)] = value
 
     def remember(self):
         """What was typed stays when the step is left and come back to. What was only
@@ -404,6 +410,7 @@ class Wizard:
         repos = list(dict.fromkeys(first + [item["repo"] for item in self.found if item["repo"]]))
         return {"repos": ", ".join(a["repos"]) if self.mode == "repos" else ", ".join(repos), "count": str(self.plan["count"]) if self.plan else "0", "name": a["name"], "dir": a["dir"], "local_repo": self.plan["repo"] if self.plan and self.plan["repo"] in a["repos"] else (a["repos"] or [""])[0],
                 "token": "", "other": "n", "ssh": "", "service": "", "approval": "n", "workflows": ", ".join(a["workflows"]),
+                "kind": "linux", "rname": a["rname"], "rdir": a["rdir"], "rcount": str(a["rcount"]),
                 "label": self.default_label(), "hostname": a["host_name"],
                 "command": "y"}.get(step, "")
 
@@ -418,7 +425,9 @@ class Wizard:
         a, step = self.answers, self.step
         # A token is for registering a runner: asked only when one is missing.
         registering = "token" if self.missing_runners() else "other"
-        return {"repos": "save" if self.mode == "repos" else "count", "name": "dir", "local_repo": registering, "token": "other", "ssh": "service",
+        return {"repos": "save" if self.mode == "repos" else "count", "name": "dir", "local_repo": registering, "token": "other", "ssh": "kind" if self.mode == "host" else "service",
+                "kind": "rname" if a["host_kind"] == "macos" else "service", "rname": "rdir", "rdir": "rcount",
+                "rcount": "hostname",
                 "service": "hostname" if self.mode == "host" else "approval", "hostname": "save", "command": "review",
                 "workflows": "label" if self.mode == "setup" or a["workflows"] else "save",
                 "label": "command" if self.mode == "setup" else "save",
@@ -475,6 +484,18 @@ class Wizard:
             if (not names and self.mode == "setup") or not all(WORD.match(w) for w in names):
                 return "Write the workflow names, with a comma between them.", None, None
             return None, None, names
+        if step == "kind":
+            word = value.lower()
+            if word not in ("linux", "macos", "mac", "osx"):
+                return "Write linux or macos.", None, None
+            return None, None, "macos" if word in ("macos", "mac", "osx") else "linux"
+        if step in ("rname", "rdir") and (not (WORD.match(value) and " " not in value if step == "rname" else FOLDER.match(value))):
+            return ("Use letters, digits, dots, dashes and underscores. No spaces." if step == "rname"
+                    else "Write a folder, like ~/actions-runner."), None, None
+        if step == "rcount":
+            if not re.fullmatch(r"[0-9]|1[0-9]|20", value):
+                return "Write a number from 0 to 20.", None, None
+            return None, None, int(value)
         if step == "hostname" and (not WORD.match(value) or " " in value):
             return "Use letters, digits, dots, dashes and underscores. No spaces.", None, None
         if step == "label" and not WORD.match(value):
@@ -569,7 +590,7 @@ class Wizard:
                       "Leave it empty to ask gh. This works only if you are an admin of the repository.",
                       "The token is shown as dots and is not saved."],
             "other": ["Do you also want to see a second computer on this screen?",
-                      "For example your Linux PC, while this runs on your Mac. It must run Linux for now. The program only reads from it.",
+                      "For example your Linux PC, while this runs on your Mac, or your Mac, while this runs on your PC. The program only reads from it.",
                       "If you are not sure, answer n. You can add it later in the config file."],
             "ssh": ["What is the SSH address of the machine?", "For example: me@my-pc. It must work with a key, without a password."],
             "service": ["What is the name of the runner service on that machine?",
@@ -589,6 +610,13 @@ class Wizard:
                      + [
                       "The title of the issue is the workflow name, a branch and a commit. For example: "
                       + (a["workflows"] or ["Deploy"])[0] + ": main a0d3a70"],
+            "kind": ["Does that computer run Linux or macOS?",
+                     "Write linux or macos. A Mac is read through a small program that it is sent over ssh."],
+            "rname": ["What are the runners on that Mac called?",
+                      "They are called NAME, NAME-2, NAME-3 and so on. For example: mac."],
+            "rdir": ["In which folder are they?",
+                     "The second one is in the same folder with -2 after it. For example: ~/actions-runner."],
+            "rcount": ["How many runners does it have?", "0 means none: you only watch the Mac itself."],
             "hostname": ["What do you call this computer?",
                          "A short name, like pc. It is the name of its section in the config file."],
             "save": (["Saved.", ""]

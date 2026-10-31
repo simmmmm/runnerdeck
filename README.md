@@ -20,7 +20,7 @@
 ## What it does
 
 - It shows each runner on your machine, what it does, and how far its job is.
-- It shows CPU, GPU, memory, and temperature of your machines. It reads a second computer over SSH.
+- It shows CPU, GPU, memory, and temperature of your machines. It reads a second computer over SSH, a Linux PC or a Mac.
 - It shows the last workflow runs of your repositories. You can cancel, repeat, or open a run.
 - The first time, it asks a few questions on the screen and writes the config file for you. It finds runners that are set up already.
 - It shows builds that are not on GitHub too, when you start them with `runnerdeck run -- <command>`. See [Builds](docs/builds.md).
@@ -32,7 +32,7 @@
 - Python 3.9 or newer. You do not need other packages.
 - The [GitHub CLI](https://cli.github.com), logged in (`gh auth login`).
 - macOS, Linux, or Windows.
-- An SSH key for a second computer. It must run Linux for now. The program never asks for a password.
+- An SSH key for a second computer: a Linux PC or a Mac. The program never asks for a password.
 
 ## Start
 

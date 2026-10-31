@@ -77,6 +77,23 @@ service = actions-runner.service
 
 The program shows CPU, GPU, memory, temperature, and the state of the runner. It only reads. It changes nothing on the PC.
 
+### 3b. Show a Mac as the second computer
+
+You run runnerdeck on a Linux PC, and you want to see your Mac too: its load, its battery and heat, its runners and its builds.
+
+```ini
+[host mac]
+ssh = me@macbook
+kind = macos
+name = mac
+dir = ~/actions-runner
+count = 3
+```
+
+`name`, `dir` and `count` say where the runners of that Mac are: `mac`, `mac-2` and `mac-3` in `~/actions-runner`, `~/actions-runner-2` and `~/actions-runner-3`. Leave them out to only watch the Mac itself. `service` is for Linux: do not use it here.
+
+The Mac is sent a small Python program over SSH, and runs it with its own `python3`. The program only reads. It uses the same tools that runnerdeck uses on its own Mac (`top`, `vm_stat`, `ioreg`), and it reads the log files of the runners. Nothing is installed on the Mac. The runners are shown but not started or stopped: for that, open runnerdeck on the Mac itself (`ssh -t mac runnerdeck`).
+
 Use an SSH key. The program never asks for a password. If the PC does not answer, the box says so.
 
 ### 4. Watch two repositories
@@ -99,7 +116,8 @@ check = CI
 | Machine | How |
 |---|---|
 | The Mac that runs the program | With the tools of macOS. |
+| A Mac over SSH | With a small Python program that the Mac is sent. It uses the same tools as the Mac itself. |
 | A Linux machine, here or over SSH | With one short script. It reads `/proc` and `/sys`. AMD cards: from `/sys`. NVIDIA cards: with `nvidia-smi`. |
 | The Windows machine that runs the program | With the counters of Windows. NVIDIA cards: with `nvidia-smi`. The program does not show the temperature of the processor. |
 
-A machine over SSH must run Linux.
+A machine over SSH is a Linux PC or a Mac. A Windows machine over SSH is not read.

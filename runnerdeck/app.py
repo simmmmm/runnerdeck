@@ -9,10 +9,10 @@ import threading
 import zipfile
 from .util import read
 from .system import WINDOWS
-from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, set_section
+from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, runner_rows, set_section
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
 from .github import Queue, act_on_run, approve, close, row_of
-from .machines import Pc, build_machines
+from .machines import Pc, RemoteMac, build_machines
 from .terminal import ConsoleTerminal, CursesTerminal, ENTER, Grid, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
 from .boxes import paint
 from .builds import run_recorded
@@ -81,8 +81,11 @@ def show(window, cfg, runners, queue, machine, pcs=()):
         wizard = Wizard.for_host(cfg)
         run_setup(window, wizard)
         if wizard.saved:
-            name, host, service = (wizard.answers[key] for key in ("host_name", "ssh", "service"))
-            pcs[:] = [pc for pc in pcs if pc.name != name] + [Pc(name, host, service)]
+            a = wizard.answers
+            name, host, service = a["host_name"], a["ssh"], a["service"]
+            new = (RemoteMac(name, host, runner_rows(a["rname"], a["rdir"], a["rcount"])) if a["host_kind"] == "macos"
+                   else Pc(name, host, service))
+            pcs[:] = [pc for pc in pcs if pc.name != name] + [new]
             try:
                 cfg.hosts = load().hosts
             except (ConfigError, ValueError):

@@ -12,7 +12,8 @@ from .terminal import frame, heat, meter, popup, right, spark
 MARKS = {"running": "●", "listening": "○", "starting": "◌"}
 
 
-WORDS = {"listening": "Listening", "starting": "Starting…", "stopped": "Stopped", "not set up": "Not set up"}
+WORDS = {"listening": "Listening", "starting": "Starting…", "stopped": "Stopped", "not set up": "Not set up",
+         "unreachable": "Unreachable"}
 
 
 RESULTS = {"success": "✓", "failure": "✗", "cancelled": "–", "skipped": "–"}
@@ -24,7 +25,10 @@ def mac_box(canvas, y, width, machine):
     now = machine.now
     wide = width >= 96
     height = 5 if wide else 8
-    frame(canvas, y, 0, height, width, "mac", f"load {os.getloadavg()[0]:.1f} · {os.cpu_count()} cores")
+    # This Mac has the name "mac" and its own load; a Mac over ssh brings its name and what it says of itself.
+    title = getattr(machine, "title", "mac")
+    summary = machine.summary() if hasattr(machine, "summary") else f"load {os.getloadavg()[0]:.1f} · {os.cpu_count()} cores"
+    frame(canvas, y, 0, height, width, title, summary)
     half = (width - 4) // 2 - 1 if wide else width - 4
     row = y + 1
     for name, value, history in (("CPU", now.get("cpu"), machine.cpu), ("GPU", now.get("gpu"), machine.gpu)):
@@ -144,7 +148,7 @@ def progress(job):
     return (done / len(steps) if steps else 0), words, ""
 
 
-def runners_box(canvas, y, width, runners, queue):
+def runners_box(canvas, y, width, runners, queue, title="runners"):
     """Each runner: what it is doing in its own words, the last result in
     its colour, and a busy one's progress beside it, or under it where the
     screen is narrow."""
@@ -156,7 +160,7 @@ def runners_box(canvas, y, width, runners, queue):
         rows.append((runner, state, job, since, last, busy))
     height = 2 + len(rows) + sum(1 for row in rows if row[5] and not wide)
     busy_count = sum(1 for row in rows if row[1] == "running")
-    frame(canvas, y, 0, height, width, "runners", f"{busy_count} of {len(rows)} busy")
+    frame(canvas, y, 0, height, width, title, f"{busy_count} of {len(rows)} busy")
     line = y + 1
     for runner, state, job, since, last, busy in rows:
         style = "strong" if state == "running" else "dim" if state in ("stopped", "not set up") else "plain"
@@ -365,7 +369,13 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
         y = mac_box(canvas, y, width, machine)
     # A computer that did not answer has no box: a line in the head says which.
     for pc in pcs:
-        if pc.reachable():
+        if not pc.reachable():
+            continue
+        if getattr(pc, "kind", "linux") == "macos":
+            y = mac_box(canvas, y, width, pc)
+            if pc.runners:
+                y = runners_box(canvas, y, width, pc.runner_list(), queue, f"runners · {pc.name}")
+        else:
             y = pc_box(canvas, y, width, pc)
     down = [pc.name for pc in pcs if getattr(pc, "failed", False) and not pc.reachable()]
     if down:

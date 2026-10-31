@@ -488,6 +488,10 @@ with tempfile.TemporaryDirectory() as tmp:
     w = setupmod.Wizard.for_host(now_cfg, Checks(), path=plain, threaded=False)
     assert w.step == "ssh" and w.mode == "host"
     answer(w, "me@192.168.2.15")
+    assert w.step == "kind" and w.field == "linux"                           # Linux or macOS: asked before anything else about it
+    answer(w, "plan9")
+    assert w.step == "kind" and w.bad
+    answer(w, "linux")
     assert w.step == "service"
     answer(w, "x.service")
     assert w.step == "hostname" and w.field == "pc"                          # an address of numbers is not a name
@@ -507,7 +511,7 @@ with tempfile.TemporaryDirectory() as tmp:
     answer(w, "me@pc")
     assert w.step == "ssh" and "refuses the connection" in w.note
     answer(w)
-    assert w.step == "service"
+    assert w.step == "kind"
     w = setupmod.Wizard.for_host(now_cfg, Checks(), path=plain, threaded=False)
     w.feed(27)
     assert w.finished and w.cancelled and not w.saved
@@ -882,7 +886,8 @@ if not system.WINDOWS:
         send("owner/name, o/other\r", "Saved.")
         send("\r", "no runs")
         send("h", "SSH address")
-        send("me@192.168.2.15\r", "runner service")        # tried at once, then it asks for the service
+        send("me@192.168.2.15\r", "Linux or macOS")        # tried at once, then what kind of computer it is
+        send("\r", "runner service")                       # Linux (what is offered), so its service is asked
         send("\r", "What do you call this computer")
         send("\r", "Saved.")
         send("\r", "no runs")                              # back on the main screen, with the computer added
@@ -1167,6 +1172,131 @@ if not system.WINDOWS:
         code, said = screen_with({"TERM": "xterm-256color"}, tty=False)               # ssh without -t: no terminal at all
         assert code != 0 and "needs a terminal" in said and "ssh -t" in said and "Traceback" not in said, (code, said)
 
+# --- a Mac as the second computer: its config, the program it is sent, its answer, its runners, its box
+mac_cfg = configured("[deck]\nrepos = a/b\n[host mac]\nssh = me@macbook\nkind = macos\nname = mac\ndir = ~/actions-runner\ncount = 3\n"
+                     "[host pc]\nssh = me@pc\nservice = x.service\n")
+macs = {h["name"]: h for h in mac_cfg.hosts}
+assert macs["mac"]["kind"] == "macos" and macs["mac"]["service"] == ""
+assert macs["mac"]["runners"] == [("mac", "~/actions-runner"), ("mac-2", "~/actions-runner-2"), ("mac-3", "~/actions-runner-3")]
+assert macs["pc"]["kind"] == "linux" and macs["pc"]["runners"] == []
+assert configured("[deck]\nrepos = a/b\n[host m]\nssh = me@m\nkind = macos\n").hosts[0]["runners"] == []       # only the Mac itself
+for bad, word in (("kind = macos\nservice = x.service\n", "service is for Linux"), ("kind = beos\n", "linux or macos"),
+                  ("kind = macos\ncount = 21\n", "count"), ("kind = macos\ncount = many\n", "count"),
+                  ("kind = macos\ndir = ~/a b\ncount = 1\n", "dir"), ("kind = macos\nname = a b\ncount = 1\n", "name")):
+    refuses("[deck]\nrepos = a/b\n[host m]\nssh = me@m\n" + bad, word)
+assert configmod.runner_rows("box", "~/r", 2) == [("box", "~/r"), ("box-2", "~/r-2")] and configmod.runner_rows("box", "~/r", 0) == []
+
+with tempfile.TemporaryDirectory() as tmp:
+    hosts_file = os.path.join(tmp, "m.ini")
+    open(hosts_file, "w").write("[deck]\nrepos = a/b\n")
+    configmod.set_host(hosts_file, "mac", "me@macbook", kind="macos", runners={"name": "mac", "dir": "~/actions-runner", "count": 3})
+    assert "[host mac]\nssh = me@macbook\nkind = macos\nname = mac\ndir = ~/actions-runner\ncount = 3\n" in open(hosts_file).read()
+    assert configmod.load(hosts_file).hosts[0]["runners"][2] == ("mac-3", "~/actions-runner-3")
+    configmod.set_host(hosts_file, "mac", "me@macbook", kind="macos", runners={"name": "mac", "dir": "~/x", "count": 0})   # watch only
+    assert configmod.load(hosts_file).hosts[0]["runners"] == [] and open(hosts_file).read().count("[host mac]") == 1
+
+    # the questions: a Mac asks for its runners instead of a service
+    w = setupmod.Wizard.for_host(configured("[deck]\nrepos = a/b\n"), Checks(), path=hosts_file, threaded=False)
+    answer(w, "me@macbook.local")
+    answer(w, "macOS")
+    assert w.step == "rname" and w.answers["host_kind"] == "macos"
+    answer(w, "has space")
+    assert w.step == "rname" and w.bad
+    answer(w, "mac")
+    assert w.step == "rdir"
+    answer(w, "~/a b")
+    assert w.step == "rdir" and w.bad
+    answer(w, "~/actions-runner")
+    assert w.step == "rcount" and w.field == "0"
+    answer(w, "21")
+    assert w.step == "rcount" and w.bad
+    answer(w, "2")
+    assert w.step == "hostname" and w.field == "macbook"
+    answer(w)
+    assert w.step == "save" and w.saved
+    one = next(h for h in configmod.load(hosts_file).hosts if h["name"] == "macbook")
+    assert (one["name"], one["kind"], one["runners"]) == ("macbook", "macos", [("mac", "~/actions-runner"), ("mac-2", "~/actions-runner-2")])
+
+    # the program that a Mac is sent: it compiles, and run as the Mac would run it (here, on this machine, so what
+    # only a Mac can read is left out) it tells of the runners' folders and of the builds written down there
+    for number, (state, last_words) in enumerate((("running", "Running job: build"), ("idle", "Job build completed with result: Succeeded")), start=1):
+        folder = os.path.join(tmp, "r" if number == 1 else f"r-{number}")
+        os.makedirs(folder)
+        open(os.path.join(folder, ".runner"), "w").close()
+        open(os.path.join(folder, "run.log"), "w").write(f"2026-10-30 22:47:01Z: {last_words}\n")
+        if state == "running":
+            open(os.path.join(folder, "run.pid"), "w").write(str(os.getpid()))
+    data = os.path.join(tmp, "data")
+    builds.record([sys.executable, "-c", "pass"], name="made on the mac", root=data)
+    rows = [("mac", os.path.join(tmp, "r")), ("mac-2", os.path.join(tmp, "r-2")), ("mac-3", os.path.join(tmp, "nowhere"))]
+    program = machines.mac_program(rows)
+    compile(program, "<mac>", "exec")
+    assert "def cpu" in program and "def thermal" in program and "RUNNERS = " in program
+    fake = os.path.join(tmp, "bin")
+    os.makedirs(fake)
+    with open(os.path.join(fake, "ssh"), "w") as file:                       # an ssh that runs what it is sent, here
+        file.write('#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done; shift; shift; exec "$@"\n')
+    os.chmod(os.path.join(fake, "ssh"), 0o755)
+    saved_env = {key: os.environ.get(key) for key in ("PATH", "RUNNERDECK_DATA")}
+    os.environ["PATH"], os.environ["RUNNERDECK_DATA"] = fake + os.pathsep + os.environ["PATH"], data
+    try:
+        answered = machines.ask_mac("me@macbook", rows)
+    finally:
+        for key, value in saved_env.items():
+            os.environ[key] = value
+    assert answered is not None and [r["name"] for r in answered["runners"]] == ["mac", "mac-2", "mac-3"], answered
+    by_name = {r["name"]: r for r in answered["runners"]}
+    assert by_name["mac"]["configured"] and by_name["mac"]["running"] and not by_name["mac-2"]["running"]
+    assert not by_name["mac-3"]["configured"] and by_name["mac"]["log"] == ["2026-10-30 22:47:01Z: Running job: build"]
+    assert [b["name"] for b in answered["builds"]] == ["made on the mac"] and answered["builds"][0]["status"] == "success"
+    assert answered["cores"] and answered["load"] is not None
+    assert machines.ask_mac("-oProxyCommand=x", rows) is None
+
+    # what comes back is only used for what it should be
+    good = machines.parse_mac("welcome to the mac\n" + json.dumps({
+        "cpu": 13.0, "gpu": 5, "load": 3.2, "cores": 11, "memory": [11.8, 18.0], "thermal": "Nominal", "now": 5000.0,
+        "power": {"watts": 7.0, "percent": 94.0, "warm": 30.0, "external": False, "charging": False},
+        "runners": [{"name": "mac\x1b[2J", "configured": True, "running": True, "log": ["a\x1b[31m line"]}, {"name": 5}, "x"],
+        "builds": [{"mtime": 4990.0, "info": {"name": "tests", "start": 4000.0, "end": None, "code": None}}, {"mtime": "x", "info": {}}]}))
+    assert (good["cpu"], good["gpu"], good["memory"], good["thermal"]) == (13.0, 5.0, (11.8, 18.0), "Nominal")
+    assert good["power"]["percent"] == 94.0 and good["power"]["external"] is False
+    assert [r["name"] for r in good["runners"]] == ["mac[2J"] and good["runners"][0]["log"] == ["a[31m line"]       # nothing that moves the cursor
+    assert [(b["name"], b["status"]) for b in good["builds"]] == [("tests", "running")]
+    assert machines.parse_mac("") is None and machines.parse_mac("{not json") is None and machines.parse_mac("[1]") is None
+    odd = machines.parse_mac(json.dumps({"cpu": "high", "memory": "much", "thermal": "Lava", "power": 3, "runners": "x", "builds": 4}))
+    assert odd["cpu"] is None and odd["memory"] is None and odd["thermal"] is None and odd["power"] is None
+    assert odd["runners"] == [] and odd["builds"] == []
+
+# a runner on a Mac, read from its folder: what it says and how it ends
+mac_stub = _types.SimpleNamespace(reachable=lambda: True, now={"runners": [
+    {"name": "mac", "configured": True, "running": True, "log": ["2026-10-30 22:47:01Z: Running job: build"]},
+    {"name": "mac-2", "configured": True, "running": True, "log": ["2026-10-30 22:58:05Z: Job check completed with result: Succeeded"]},
+    {"name": "mac-3", "configured": True, "running": False, "log": []}, {"name": "mac-4", "configured": False, "running": False, "log": []}]})
+states = {n: machines.RemoteRunner(mac_stub, n).state() for n in ("mac", "mac-2", "mac-3", "mac-4", "mac-9")}
+assert states["mac"][:2] == ("running", "build") and states["mac-2"][0] == "listening" and "check succeeded" in states["mac-2"][3]
+assert states["mac-3"][0] == "stopped" and states["mac-4"][0] == "not set up" and states["mac-9"][0] == "not set up"
+assert machines.RemoteRunner(_types.SimpleNamespace(reachable=lambda: False, now={}), "mac").state()[0] == "unreachable"
+
+# its box, with its own name and what it says of itself, and its runners under it; nothing when it does not answer
+def remote_mac(reachable=True):
+    mac = _types.SimpleNamespace(
+        kind="macos", name="macbook", title="macbook", host="me@macbook", failed=not reachable, reachable=lambda: reachable, cpu=[10.0, 20.0],
+        gpu=[5.0], runners=[("mac", "~/a"), ("mac-2", "~/a-2")], builds=None,
+        now={"cpu": 20.0, "gpu": 5.0, "load": 3.2, "cores": 11.0, "memory": (11.8, 18.0), "thermal": "Nominal", "builds": [],
+             "power": {"watts": 7.0, "percent": 94.0, "warm": 30.0, "external": False, "charging": False},
+             "runners": [{"name": "mac", "configured": True, "running": True, "log": ["2026-10-30 22:47:01Z: Running job: build"]},
+                         {"name": "mac-2", "configured": True, "running": True, "log": ["2026-10-30 22:58:05Z: Job check completed with result: Succeeded"]}]})
+    mac.summary = lambda: "macbook · load 3.2 · 11 cores"
+    mac.runner_list = lambda: [machines.RemoteRunner(mac, n) for n, _ in mac.runners]
+    return mac
+
+
+shown = drawn(two, nothing, [remote_mac()], width=110)
+assert "╭─ macbook" in shown and "macbook · load 3.2 · 11 cores" in shown and "Nominal" in shown and "on battery" in shown, shown
+assert "runners · macbook" in shown and "1 of 2 busy" in shown and "Running build" in shown and "last check succeeded" in shown, shown
+gone = drawn(two, nothing, [remote_mac(reachable=False)], width=110)
+assert "macbook not answering" in gone.splitlines()[0] and "╭─ macbook" not in gone and "runners · macbook" not in gone
+
 # --- one file from the package: it runs, and what it starts again (the watcher) finds itself
 with tempfile.TemporaryDirectory() as tmp:
     from runnerdeck import app
@@ -1184,6 +1314,10 @@ with tempfile.TemporaryDirectory() as tmp:
                           "print(env['PYTHONPATH'].split(system.os.pathsep)[0]); print(command[1:])"],
                          env=env, cwd=tmp, capture_output=True, text=True)
     assert out.returncode == 0 and out.stdout.splitlines()[0] == pyz and out.stdout.splitlines()[1] == "['-m', 'runnerdeck', 'x']", out
+    # the program that a Mac is sent is made from the source of the readers: that must be there in the one file too
+    made = subprocess.run([sys.executable, "-c", "from runnerdeck import machines; p = machines.mac_program([('mac', '~/r')]); "
+                           "compile(p, 'mac', 'exec'); print(len(p), 'def thermal' in p)"], env=env, cwd=tmp, capture_output=True, text=True)
+    assert made.returncode == 0 and made.stdout.split()[1] == "True" and int(made.stdout.split()[0]) > 2000, (made.stdout, made.stderr)
     started = subprocess.run([sys.executable, "-c", "from runnerdeck import config, runners; cfg = config.load(); runners.keep_watch(cfg); "
                               "import time; time.sleep(1.5); print(runners.alive(cfg.watch)); runners.end(cfg.watch); "
                               "time.sleep(0.5); print(runners.alive(cfg.watch))"],

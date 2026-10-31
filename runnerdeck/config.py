@@ -7,6 +7,7 @@ import shutil
 SLUG = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$")
 HOST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@:-]*$")
+FOLDER = re.compile(r"^[A-Za-z0-9_./~-]+$")
 # Everything the file can say, as comments: written at the foot of every file the
 # program makes, to read with cat or in a file manager. Explanations are on their own
 # lines: a # after a value would become a part of the value.
@@ -32,9 +33,17 @@ REFERENCE = """\
 #
 # [host pc]
 # Another computer, read over ssh with a key (never a password). One section for each.
-# It must run Linux for now. Its runner is a systemd user service.
+# A Linux PC: its runner is a systemd user service.
 # ssh = user@pc
 # service = actions-runner.service
+#
+# [host mac]
+# A Mac: kind = macos. Its runners are read from their folders: name, name-2 in dir, dir-2.
+# ssh = user@macbook
+# kind = macos
+# name = mac
+# dir = ~/actions-runner
+# count = 3
 #
 # [approval]
 # Workflows that start only after you say yes. An issue with the label and a title
@@ -116,9 +125,25 @@ def configure(config):
         if section.startswith("host "):
             name, host = section[5:].strip(), config[section].get("ssh", "")
             service = config[section].get("service", "")
+            kind = config[section].get("kind", "linux").strip().lower()
             if not WORD.match(name) or not HOST.match(host) or (service and not HOST.match(service)):
                 raise ConfigError(f"[{section}]: a name, ssh = user@host, service = name.service")
-            cfg.hosts.append({"name": name, "ssh": host, "service": service})
+            if kind not in ("linux", "macos"):
+                raise ConfigError(f"[{section}]: kind is linux or macos")
+            runners = []
+            if kind == "macos":
+                # A Mac's runners are read from their folders: name, name-2 in dir, dir-2.
+                if service:
+                    raise ConfigError(f"[{section}]: service is for Linux. For a Mac use name, dir and count")
+                rname, rdir = config[section].get("name", "mac"), config[section].get("dir", "~/actions-runner")
+                try:
+                    count = int(config[section].get("count", "0"))
+                except ValueError:
+                    count = -1
+                if not WORD.match(rname) or " " in rname or not FOLDER.match(rdir) or not 0 <= count <= 20:
+                    raise ConfigError(f"[{section}]: name, dir (like ~/actions-runner) and count (0 to 20)")
+                runners = runner_rows(rname, rdir, count)
+            cfg.hosts.append({"name": name, "ssh": host, "service": service, "kind": kind, "runners": runners})
     workflows = listed(config.get("approval", "workflows", fallback=""))
     label = config.get("approval", "label", fallback="").strip()
     if workflows and (not label or not WORD.match(label) or not all(WORD.match(name) for name in workflows)):
@@ -186,6 +211,19 @@ def set_approval(path, workflows, label):
     set_section(path, "[approval]", [f"workflows = {', '.join(workflows)}", f"label = {label}"] if workflows else [])
 
 
-def set_host(path, name, ssh, service=""):
-    """The section [host name]: a computer to read over ssh, added, or changed if it is there."""
-    set_section(path, f"[host {name}]", [f"ssh = {ssh}"] + ([f"service = {service}"] if service else []))
+def runner_rows(name, folder, count):
+    """The runners of a row: (name, folder), then (name-2, folder-2) and so on."""
+    return [(name if n == 1 else f"{name}-{n}", folder if n == 1 else f"{folder}-{n}") for n in range(1, count + 1)]
+
+
+def set_host(path, name, ssh, service="", kind="linux", runners=None):
+    """The section [host name]: a computer to read over ssh, added, or changed if it is there. A Mac has
+    `runners` {name, dir, count}: the folders its runners are read from."""
+    body = [f"ssh = {ssh}"]
+    if kind == "macos":
+        body.append("kind = macos")
+        if runners and runners.get("count"):
+            body += [f"name = {runners['name']}", f"dir = {runners['dir']}", f"count = {runners['count']}"]
+    elif service:
+        body.append(f"service = {service}")
+    set_section(path, f"[host {name}]", body)

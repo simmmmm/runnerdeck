@@ -1,5 +1,6 @@
 """What a machine is doing: a Mac through its own tools, a Linux machine (here or over ssh) through one script, Windows through the system's counters."""
 import ctypes
+import inspect
 import json
 import os
 import platform
@@ -282,6 +283,14 @@ def windows_here():
     return now
 
 
+def ssh_command(host, *remote):
+    """ssh to a host with a key only (never a password prompt), over one kept connection where there can be one."""
+    # Windows' ssh does not keep a connection open between calls.
+    keep = [] if WINDOWS else ["-o", "ControlMaster=auto", "-o", "ControlPersist=120",
+                               "-o", "ControlPath=" + os.path.expanduser("~/.ssh/runnerdeck-%C")]
+    return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", *keep, "--", host, *remote]
+
+
 def ask_pc(host, service=""):
     """One round trip: the machine's answer, parsed, or None when it did not
     give one. Without a host it is this machine, asked with the same script."""
@@ -293,10 +302,7 @@ def ask_pc(host, service=""):
         return windows_here()
     command = ["sh", "-s", service]
     if host is not None:
-        # Windows' ssh does not keep a connection open between calls.
-        keep = [] if WINDOWS else ["-o", "ControlMaster=auto", "-o", "ControlPersist=120",
-                                   "-o", "ControlPath=" + os.path.expanduser("~/.ssh/runnerdeck-%C")]
-        command = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", *keep, "--", host, *command]
+        command = ssh_command(host, *command)
     got = subprocess.run(command, input=PC_ASKS, capture_output=True, text=True, timeout=20)
     return parse_pc(got.stdout) if got.returncode == 0 and got.stdout.strip() else None
 
@@ -348,9 +354,165 @@ class Pc:
             time.sleep(2 if self.reachable() else 15)
 
 
+# The readers that a Mac reads itself with: their source is what a Mac is sent.
+MAC_READERS = (run, cpu, gpu, memory, watts, power, thermal)
+
+MAC_PROGRAM = """
+def tail(path, size=16384):
+    try:
+        with open(path, "rb") as log:
+            log.seek(0, os.SEEK_END)
+            log.seek(max(0, log.tell() - size))
+            return log.read().decode("utf-8", "replace").splitlines()[-200:]
+    except OSError:
+        return []
+
+
+def alive(path):
+    try:
+        with open(path) as file:
+            os.kill(int(file.read().strip()), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+out = {}
+for name, read in (("cpu", cpu), ("gpu", gpu), ("memory", memory), ("power", power), ("thermal", thermal)):
+    try:
+        out[name] = read()
+    except Exception:
+        out[name] = None
+try:
+    out["load"] = os.getloadavg()[0]
+except OSError:
+    out["load"] = None
+out["cores"] = os.cpu_count()
+out["now"] = time.time()
+out["runners"] = []
+for name, folder in RUNNERS:
+    folder = os.path.expanduser(folder)
+    out["runners"].append({"name": name, "configured": os.path.exists(os.path.join(folder, ".runner")),
+                           "running": alive(os.path.join(folder, "run.pid")), "log": tail(os.path.join(folder, "run.log"))})
+out["builds"] = []
+builds = os.path.join(os.environ.get("RUNNERDECK_DATA") or os.path.expanduser("~/.local/share/runnerdeck"), "builds")
+try:
+    latest = sorted((os.stat(os.path.join(builds, n)).st_mtime, n) for n in os.listdir(builds) if n.endswith(".json"))[-8:]
+except OSError:
+    latest = []
+for mtime, name in latest:
+    try:
+        with open(os.path.join(builds, name), encoding="utf-8") as file:
+            out["builds"].append({"mtime": mtime, "info": json.load(file)})
+    except (OSError, ValueError):
+        pass
+print(json.dumps(out))
+"""
+
+
+def mac_program(runners):
+    """What a Mac is sent over ssh, to run with its own python3: the readers above, the folders of its
+    runners, and the records of the builds that were made there. It only reads, and prints one line of JSON."""
+    source = "\n\n\n".join(inspect.getsource(reader) for reader in MAC_READERS)
+    return ("import ctypes, json, os, re, subprocess, time\n\n" + source + "\n\n\nRUNNERS = "
+            + json.dumps([list(row) for row in runners]) + "\n" + MAC_PROGRAM)
+
+
+def parse_mac(said):
+    """A Mac's answer as numbers and names, in the shape its own box draws. What is not as it should be
+    is left out. None if there was no answer."""
+    raw = None
+    for line in said.splitlines():
+        if line.startswith("{"):
+            try:
+                raw = json.loads(line)
+            except ValueError:
+                continue
+            break
+    if not isinstance(raw, dict):
+        return None
+
+    def number(value):
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    memory, power = raw.get("memory"), raw.get("power")
+    now = {"cpu": number(raw.get("cpu")), "gpu": number(raw.get("gpu")), "load": number(raw.get("load")),
+           "cores": number(raw.get("cores")),
+           "memory": (float(memory[0]), float(memory[1])) if isinstance(memory, list) and len(memory) == 2
+                     and all(number(x) is not None for x in memory) else None,
+           "thermal": raw.get("thermal") if raw.get("thermal") in ("Nominal", "Fair", "Serious", "Critical") else None,
+           "power": None, "runners": [], "builds": []}
+    if isinstance(power, dict):
+        now["power"] = {"watts": number(power.get("watts")), "percent": number(power.get("percent")),
+                        "warm": number(power.get("warm")), "external": power.get("external") is True,
+                        "charging": power.get("charging") is True}
+    for item in raw.get("runners") if isinstance(raw.get("runners"), list) else []:
+        if isinstance(item, dict) and isinstance(item.get("name"), str):
+            log = item.get("log") if isinstance(item.get("log"), list) else []
+            now["runners"].append({"name": clean(item["name"]), "configured": item.get("configured") is True,
+                                   "running": item.get("running") is True,
+                                   "log": [clean(line) for line in log if isinstance(line, str)]})
+    clock = number(raw.get("now")) or time.time()
+    for item in raw.get("builds") if isinstance(raw.get("builds"), list) else []:
+        if isinstance(item, dict) and number(item.get("mtime")) is not None:
+            found = normalize(item.get("info"), number(item["mtime"]), clock)
+            if found:
+                now["builds"].append(found)
+    return now
+
+
+def ask_mac(host, runners):
+    """One round trip to a Mac: its answer, parsed, or None."""
+    if not HOST.match(host):
+        return None
+    got = subprocess.run(ssh_command(host, "python3", "-"), input=mac_program(runners), capture_output=True, text=True,
+                         timeout=60)
+    return parse_mac(got.stdout) if got.returncode == 0 else None
+
+
+class RemoteRunner:
+    """A runner on another computer: read, never started or stopped from here."""
+
+    def __init__(self, mac, name):
+        self.mac, self.name = mac, name
+
+    def state(self):
+        if not self.mac.reachable():
+            return "unreachable", "", None, ""
+        entry = next((item for item in self.mac.now.get("runners", []) if item["name"] == self.name), None)
+        if not entry or not entry["configured"]:
+            return "not set up", "", None, ""
+        if not entry["running"]:
+            return "stopped", "", None, ""
+        return said_by(entry["log"])
+
+
+class RemoteMac(Pc):
+    """A Mac over ssh, read as the Mac reads itself, with its runners."""
+
+    kind = "macos"
+
+    def __init__(self, name, host, runners, once=False):
+        self.runners, self.title = runners, name
+        super().__init__(name, host, "", once)
+
+    def ask(self):
+        return ask_mac(self.host, self.runners)
+
+    def summary(self):
+        host = self.host.split("@")[-1]
+        load, cores = self.now.get("load"), self.now.get("cores")
+        return f"{host} · load {load:.1f} · {cores:.0f} cores" if load is not None and cores else host
+
+    def runner_list(self):
+        return [RemoteRunner(self, name) for name, _ in self.runners]
+
+
 def build_machines(cfg, once=False):
-    """This machine's box and the others'. A Mac is read with its own tools; a
-    Linux machine, here or over ssh, with the one script (PC_ASKS)."""
+    """This machine's box and the others'. This Mac is read with its own tools; a Linux machine, here or
+    over ssh, with the one script (PC_ASKS); a Mac over ssh with a program made of the same readers."""
     here = Machine(once) if platform.system() == "Darwin" else None
     pcs = [Pc(platform.node().split(".")[0][:12] or "here", None, "", once)] if here is None else []
-    return here, pcs + [Pc(host["name"], host["ssh"], host["service"], once) for host in cfg.hosts]
+    others = [RemoteMac(host["name"], host["ssh"], host["runners"], once) if host["kind"] == "macos"
+              else Pc(host["name"], host["ssh"], host["service"], once) for host in cfg.hosts]
+    return here, pcs + others
