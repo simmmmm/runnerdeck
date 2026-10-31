@@ -30,6 +30,9 @@ REFERENCE = """\
 # version = 2.338.2
 # macOS: this keychain is unlocked before the runners start.
 # keychain = ~/Library/Keychains/login.keychain-db
+# Linux: a runner that runs as a systemd user service is shown on the screen, and is not started
+# or stopped from here. With only this line (and no count) no runner is started from here.
+# service = actions-runner.service
 #
 # [host pc]
 # Another computer, read over ssh with a key (never a password). One section for each.
@@ -113,8 +116,14 @@ def configure(config):
     cfg.home = os.path.expanduser(os.environ.get("RUNNERDECK_HOME") or os.environ.get("RUNNER_HOME") or "~")
     if config.has_section("local"):
         local = config["local"]
+        # A runner that runs as a systemd service (not started from here) is shown, with `service`: then
+        # the count of runners that are started from here is 0 unless it says otherwise.
+        service = local.get("service", "").strip()
         cfg.local = {"name": local.get("name", "box"), "dir": os.path.expanduser(local.get("dir", "~/actions-runner")),
-                     "count": int(local.get("count", "1")), "repo": local.get("repo", cfg.repos[0])}
+                     "count": int(local.get("count", "0" if service else "1")), "repo": local.get("repo", cfg.repos[0]),
+                     "service": service}
+        if service and not HOST.match(service):
+            raise ConfigError(f"[local] service = name.service, like actions-runner.service: {service}")
         if not WORD.match(cfg.local["name"]) or " " in cfg.local["name"]:
             raise ConfigError(f"not a runner name: {cfg.local['name']}")
         if cfg.local["repo"] not in cfg.repos:

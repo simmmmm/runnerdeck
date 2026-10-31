@@ -56,6 +56,7 @@ Other options in `[local]`:
 | `version` | The first runner version to download. Each runner updates itself. |
 | `repo` | The repository for new runners. The default is the first in `[deck]`. |
 | `keychain` | macOS. The program unlocks this keychain before it starts the runners. |
+| `service` | Linux. A runner that runs as a systemd user service (for example `actions-runner.service`). It shows on the screen. It is not started or stopped from here. With this line and no `count`, no runner is started from here. |
 
 A runner that you add with `n` is not in the config file. The program finds it by its folder.
 

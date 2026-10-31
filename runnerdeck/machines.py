@@ -512,7 +512,9 @@ def build_machines(cfg, once=False):
     """This machine's box and the others'. This Mac is read with its own tools; a Linux machine, here or
     over ssh, with the one script (PC_ASKS); a Mac over ssh with a program made of the same readers."""
     here = Machine(once) if platform.system() == "Darwin" else None
-    pcs = [Pc(platform.node().split(".")[0][:12] or "here", None, "", once)] if here is None else []
+    # This computer, if it is not a Mac: the service of its own runner, if the config says there is one.
+    service = cfg.local["service"] if cfg.local else ""
+    pcs = [Pc(platform.node().split(".")[0][:12] or "here", None, service, once)] if here is None else []
     others = [RemoteMac(host["name"], host["ssh"], host["runners"], once) if host["kind"] == "macos"
               else Pc(host["name"], host["ssh"], host["service"], once) for host in cfg.hosts]
     return here, pcs + others

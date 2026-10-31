@@ -1413,6 +1413,18 @@ with tempfile.TemporaryDirectory() as tmp:
     boxes.builds_box(narrow, 0, 70, [dict(a_build("tests", "success", t0 - 500, t0 - 400, 0), toolchain="rustc 1.82.0 stable")])
     assert "succeeded" in narrow.text() and "rustc 1.82.0 stable" not in narrow.text()
 
+# --- a runner that runs as a service on this computer: shown, and none is started from here
+svc = configured("[deck]\nrepos = a/b\n[local]\nservice = numa-runner.service\n")
+assert svc.local["service"] == "numa-runner.service" and svc.local["count"] == 0
+assert configured("[deck]\nrepos = a/b\n[local]\nservice = x.service\ncount = 2\n").local["count"] == 2
+assert configured("[deck]\nrepos = a/b\n[local]\nname = box\n").local["count"] == 1 and configured("[deck]\nrepos = a/b\n[local]\n").local["service"] == ""
+refuses("[deck]\nrepos = a/b\n[local]\nservice = a b\n", "service")
+refuses("[deck]\nrepos = a/b\n[local]\nservice = -oX\n", "service")
+if not sys.platform == "darwin":
+    here_pcs = machines.build_machines(svc, once=True)[1]
+    assert here_pcs[0].service == "numa-runner.service" and here_pcs[0].host is None            # this computer, with its service
+    assert machines.build_machines(configured("[deck]\nrepos = a/b\n"), once=True)[1][0].service == ""
+
 # --- one file from the package: it runs, and what it starts again (the watcher) finds itself
 with tempfile.TemporaryDirectory() as tmp:
     from runnerdeck import app
