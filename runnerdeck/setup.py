@@ -704,6 +704,22 @@ def run(terminal, wizard):
     return None if wizard.cancelled else wizard.cfg
 
 
+def show_text(terminal, title, lines):
+    """Some lines to read, on the screen, until a key is pressed: the newest at the foot."""
+    colours()
+    while True:
+        canvas = Screen(terminal)
+        keep = max(4, canvas.height - 9)
+        draw(canvas, {"title": title, "lines": [("dim", line[:200]) for line in lines[-keep:]], "field": None, "secret": False,
+                      "fresh": False, "busy": None, "hint": "esc: close", "note": "", "bad": False})
+        canvas.flush()
+        key = terminal.key()
+        if key == K_RESIZE:
+            sys.stdout.buffer.write(b"\x1b[2J")
+        elif key in (27, ord("q"), 10, 13, 343):
+            return
+
+
 def menu(terminal, title, items, intro=()):
     """A list to choose one from, on the screen: the arrow keys and Enter, or the number of an item.
     The index of what was chosen, or None for Esc."""

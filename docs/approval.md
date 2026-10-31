@@ -77,3 +77,7 @@ A section that is wrong makes the config invalid, and the program says which lin
 ## Update the program
 
 `runnerdeck --update` (or *Update runnerdeck* in the settings) brings the clone it runs from up to date. It only fast-forwards `main`. It does nothing when the clone is on another branch, has changes of your own, or has commits of its own. The runners are other programs and keep running. Start runnerdeck again to use the new version.
+
+## Why did a run fail?
+
+Choose the run and press `l`: the end of what its failed steps wrote opens on the screen, as GitHub keeps it. `o` opens the run in the browser.

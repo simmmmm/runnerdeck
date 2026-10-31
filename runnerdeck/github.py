@@ -4,7 +4,7 @@ import shutil
 import subprocess
 import threading
 import time
-from .util import STAMP, moment
+from .util import STAMP, clean, moment
 
 
 def asked(cfg, issue, repo="", index=0, label=None):
@@ -50,6 +50,20 @@ def act_on_run(run, key):
     if got.returncode:
         return f"{name}: {got.stderr.strip() or 'gh said no'}", False
     return {"c": f"{name} is being cancelled", "r": f"{name} runs again", "o": f"{name} opened"}[key], True
+
+
+def failed_log(run, limit=60):
+    """The end of what a run's failed steps wrote, as GitHub keeps it: the lines, or why there are none."""
+    got = subprocess.run(["gh", "run", "view", str(run["databaseId"]), "--repo", run["repo"], "--log-failed"],
+                         capture_output=True, text=True, timeout=45)
+    if got.returncode:
+        return [got.stderr.strip().splitlines()[-1] if got.stderr.strip() else "gh could not read the log"]
+    lines = []
+    for line in got.stdout.splitlines():
+        # "job<TAB>step<TAB>2026-10-31T16:42:50.123Z message": the message is what was said.
+        parts = line.split("\t", 2)
+        lines.append(clean(parts[2].split(" ", 1)[1] if len(parts) == 3 and " " in parts[2] else line))
+    return lines[-limit:] or ["Nothing failed in this run, or GitHub keeps no log of it."]
 
 
 def row_of(item):

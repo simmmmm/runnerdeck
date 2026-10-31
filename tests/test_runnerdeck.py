@@ -950,7 +950,7 @@ assert "runners stay on" in footer_text(190, None)
 assert "c cancel" in footer_text(190, "run") and "r run again" in footer_text(190, "run")        # what the chosen run can do
 assert "enter start" in footer_text(190, "request") and "d decline" in footer_text(190, "request")
 mid = footer_text(110, "run")                                                                  # a normal window: nothing needed is gone
-for key in ("↑↓ choose", "c cancel", "r run again", "esc back", "q quit", "m settings", "s start"):
+for key in ("↑↓ choose", "c cancel", "r run again", "esc back", "l log", "q quit", "m settings"):
     assert key in mid, (key, mid)
 for picking in ("run", "request", None):
     for width in (60, 45):                                                                     # a short one keeps move, back and quit
@@ -1597,6 +1597,15 @@ assert not _ok and "apart" in _said and open(os.path.join(_clone, "b")).read() =
 updatemod.ROOT = _base
 assert not updatemod.update()[0] and "not a clone" in updatemod.update()[1]
 __import__("shutil").rmtree(_base, ignore_errors=True)
+
+# the log of a failed run: the words, without job, step and time
+_run = github.subprocess.run
+github.subprocess.run = lambda command, **kw: types.SimpleNamespace(
+    returncode=0, stderr="", stdout="publish\tdev/publish.sh\t2026-10-31T16:42:50.1234567Z error: no such key\npublish\tdev/publish.sh\t2026-10-31T16:42:51.1Z ##[error]exit 1\n")
+try:
+    assert github.failed_log({"databaseId": 5, "repo": "a/b"}) == ["error: no such key", "##[error]exit 1"]
+finally:
+    github.subprocess.run = _run
 
 # a computer that does not answer says why, in words, and a Mac's answer must be the program's own
 for said, word in (("ssh: connect to host 10.0.0.9 port 22: Connection refused", "SSH server"), ("", "did not connect")):

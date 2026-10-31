@@ -12,13 +12,13 @@ from .util import read
 from .system import WINDOWS
 from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, runner_rows, set_computer, set_section
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
-from .github import Queue, act_on_run, approve, close, row_of
+from .github import Queue, act_on_run, approve, close, failed_log, row_of
 from .update import update
 from .machines import Pc, RemoteMac, build_machines, probe
 from .terminal import ConsoleTerminal, CursesTerminal, ENTER, Grid, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
 from .boxes import paint, with_remote
 from .builds import run_recorded
-from .setup import Wizard, menu, run as run_setup
+from .setup import Wizard, menu, run as run_setup, show_text
 
 
 def show(window, cfg, runners, queue, machine, pcs=()):
@@ -250,6 +250,9 @@ def show(window, cfg, runners, queue, machine, pcs=()):
                 dialog = asks_for(request, "d")
         elif chosen and row_of(chosen) > 0 and key in (ord("c"), ord("r")):
             dialog = asks_for(chosen, chr(key))
+        elif chosen and row_of(chosen) > 0 and key == ord("l"):
+            note = "Reading the log…"
+            show_text(window, f"{chosen.get('workflowName', 'run')} · what failed", failed_log(chosen))
         elif chosen and row_of(chosen) > 0 and key == ord("o"):
             note = act_on_run(chosen, "o")[0]
         elif key == ord("x"):

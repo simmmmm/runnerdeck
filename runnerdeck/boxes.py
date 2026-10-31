@@ -355,7 +355,7 @@ def footer(canvas, y, width, note, picking=None):
     # first three here stay (move, back, quit) and the others go from the right.
     leave = "quit, runners stay on" if width >= 100 else "quit"
     general = (("m", "settings"), ("s", "start"), ("x", "stop"), ("←→", "logs"), ("q", leave))
-    keys = {"run": (("↑↓", "choose"), ("c", "cancel"), ("r", "run again"), ("o", "open"), ("esc", "back")) + general,
+    keys = {"run": (("↑↓", "choose"), ("c", "cancel"), ("r", "run again"), ("l", "log"), ("o", "open"), ("esc", "back")) + general,
             "request": (("↑↓", "choose"), ("enter", "start"), ("d", "decline"), ("esc", "back")) + general,
             "dialog": (("y", "yes"), ("n", "no"), ("← →", "choose"), ("enter", "answer")),
             "field": (("enter", "set up"), ("esc", "cancel")),
