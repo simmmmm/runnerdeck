@@ -1637,6 +1637,16 @@ try:
 finally:
     github.subprocess.run = _run
 
+# where a run is: the runner that has it, or what it waits for
+_g = terminal.Grid(6, 100)
+boxes.github_box(_g, 0, 100, [{"databaseId": 1, "workflowName": "Publish Linux", "headBranch": "main", "headSha": "50b5780ff", "status": "in_progress",
+                               "repo": "a/Numa-dev", "createdAt": "2026-10-31T16:00:00Z"},
+                              {"databaseId": 2, "workflowName": "Publish Home", "headBranch": "main", "headSha": "50b5780ff", "status": "queued",
+                               "repo": "a/Numa-dev", "createdAt": "2026-10-31T16:00:01Z"}], ["a/Numa-mac", "a/Numa-dev"], None, None,
+                {1: "numa", 2: "waiting for Linux"})
+_text = _g.text()
+assert "Publish Linux" in _text and "on numa" in _text and "waiting for Linux" in _text, _text
+
 # a computer that does not answer says why, in words, and a Mac's answer must be the program's own
 for said, word in (("ssh: connect to host 10.0.0.9 port 22: Connection refused", "SSH server"), ("", "did not connect")):
     assert word in machines.explain_ssh(said, "me@mac"), said

@@ -118,6 +118,8 @@ class Queue:
         self.cfg = cfg
         self.runs = None
         self.jobs = {}
+        # Which runner has a run, or what it waits for, by the run's number.
+        self.on = {}
         self.requests = []
         # Whether runnerdeck itself has a newer version (see update.behind); set by the screen.
         self.update_ready = False
@@ -197,9 +199,9 @@ class Queue:
                 began, ended = moment(run.get("startedAt", ""), STAMP), moment(run.get("updatedAt", ""), STAMP)
                 if began and ended and ended > began:
                     typical[key] = ended - began
-        jobs = {}
+        jobs, on = {}, {}
         for run in runs:
-            if run.get("status") != "in_progress":
+            if run.get("status") not in ("in_progress", "queued"):
                 continue
             got = subprocess.run(["gh", "api", f"repos/{run['repo']}/actions/runs/{run['databaseId']}/jobs"],
                                  capture_output=True, text=True)
@@ -207,12 +209,20 @@ class Queue:
                 listed = json.loads(got.stdout).get("jobs", []) if got.returncode == 0 else []
             except ValueError:
                 listed = []
+            # Where it is: the runners that have its jobs, or what its jobs wait for.
+            names = sorted({job["runner_name"] for job in listed if job.get("runner_name") and job.get("status") == "in_progress"})
+            waits = sorted({label for job in listed if job.get("status") == "queued" for label in job.get("labels", [])
+                            if label != "self-hosted"})
+            if names:
+                on[run["databaseId"]] = ", ".join(names)
+            elif waits:
+                on[run["databaseId"]] = "waiting for " + "/".join(waits)
             for job in listed:
                 if job.get("runner_name") and job.get("status") == "in_progress":
                     jobs[job["runner_name"]] = {"workflow": run["workflowName"], "steps": job.get("steps") or [],
                                                 "started": moment(job.get("started_at") or "", STAMP),
                                                 "typical": typical.get((run["repo"], run["workflowName"]))}
-        self.jobs = jobs
+        self.jobs, self.on = jobs, on
 
     def carry_out(self, row, word, work):
         """`work` off the screen's thread, its row saying `word` until it is

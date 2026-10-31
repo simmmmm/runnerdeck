@@ -192,8 +192,21 @@ def repo_labels(repos):
     return {repo: short if shorts.count(short) == 1 else repo for repo, short in zip(repos, shorts)}
 
 
-def github_box(canvas, y, width, runs, repos, picked=None, working=None):
+def put_on(canvas, line, at, width, run, labels, on, style):
+    """After the name of the repository: which runner has the run, or what it waits for."""
+    if labels:
+        name = labels.get(run.get("repo"), run.get("repo", ""))[:20]
+        canvas.put(line, at, name, style)
+        at += len(name) + 2
+    where = on.get(run.get("databaseId"), "")
+    if where and at < width - 40:
+        canvas.put(line, at, (where if where.startswith("waiting") else f"on {where}")[:max(0, width - at - 34)],
+                   "warm" if where.startswith("waiting") else "strong" if style == "dim" else style)
+
+
+def github_box(canvas, y, width, runs, repos, picked=None, working=None, on=None):
     working = working or {}
+    on = on or {}
     # Every run says which repository it is of as soon as there are two, not only when the
     # runs shown happen to be of both.
     many = len(repos) > 1
@@ -212,8 +225,7 @@ def github_box(canvas, y, width, runs, repos, picked=None, working=None):
             canvas.put(line, 4, run.get("workflowName", "")[:name_w], "picked")
             canvas.put(line, branch_at, run.get("headBranch", "")[:branch_w], "picked")
             canvas.put(line, sha_at, run.get("headSha", "")[:7], "picked")
-            if many:
-                canvas.put(line, repo_at, labels.get(run.get("repo"), run.get("repo", ""))[:20], "picked")
+            put_on(canvas, line, repo_at, width, run, labels if many else None, on, "picked")
             word = f"{doing}…" if doing else run.get("conclusion") or (run.get("status") or "").replace("_", " ")
             right(canvas, line, width, f"{word} · {ago(moment(run.get('createdAt', ''), STAMP))}", "picked")
             continue
@@ -225,8 +237,7 @@ def github_box(canvas, y, width, runs, repos, picked=None, working=None):
         canvas.put(line, 4, run.get("workflowName", "")[:name_w], "strong" if not done else "plain")
         canvas.put(line, branch_at, run.get("headBranch", "")[:branch_w], "dim")
         canvas.put(line, sha_at, run.get("headSha", "")[:7], "dim")
-        if many:
-            canvas.put(line, repo_at, labels.get(run.get("repo"), run.get("repo", ""))[:20], "dim")
+        put_on(canvas, line, repo_at, width, run, labels if many else None, on, "dim")
         word = f"{doing}…" if doing else conclusion if done else (run.get("status") or "").replace("_", " ")
         when = ago(moment(run.get("createdAt", ""), STAMP))
         right(canvas, line, width, f"{word} · {when}", "warm" if doing else style if style != "dim" else "label")
@@ -434,7 +445,8 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
         canvas.put(y + 1, 2, queue.problem[:width - 4], "warm")
         y += 3
     if queue.runs and room >= 5:
-        y = github_box(canvas, y, width, queue.runs[:max(1, min(len(queue.runs), room - 7))], cfg.repos, picked, queue.working)
+        y = github_box(canvas, y, width, queue.runs[:max(1, min(len(queue.runs), room - 7))], cfg.repos, picked, queue.working,
+                       getattr(queue, "on", None))
     logs = with_remote(runners, pcs)
     if logs and height - 1 - y >= 3:
         log_box(canvas, y, width, height - 1 - y, logs, shown % len(logs))
