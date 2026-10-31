@@ -277,10 +277,40 @@ def requests_box(canvas, y, width, requests, picked=None, working=None, labels=N
     return y + 2 + len(requests)
 
 
-def log_box(canvas, y, width, height, runner):
-    """The log of the runner shown, its newest lines at the foot; a job's
-    start in white, its end in the colour of how it ended."""
-    frame(canvas, y, 0, height, width, f"log · {runner.name}", "tab: another")
+def fit_tabs(sizes, shown, room):
+    """Which tabs fit in `room` columns, a space between them: the one shown, and as many of its
+    neighbours as there is room for. (first, last)"""
+    first = last = shown
+    used = sizes[shown]
+    grew = True
+    while grew:
+        grew = False
+        if last + 1 < len(sizes) and used + 1 + sizes[last + 1] <= room:
+            last += 1
+            used += 1 + sizes[last]
+            grew = True
+        if first > 0 and used + 1 + sizes[first - 1] <= room:
+            first -= 1
+            used += 1 + sizes[first]
+            grew = True
+    return first, last
+
+
+def log_box(canvas, y, width, height, runners, shown):
+    """The log of the runner shown, its newest lines at the foot; a job's start in white, its end in
+    the colour of how it ended. All the runners are tabs on the top edge: the one shown on white, the
+    others grey, a dot where a job runs."""
+    runner = runners[shown]
+    right_text = "←→ other log" if width >= 70 else ""
+    frame(canvas, y, 0, height, width, "log", right_text)
+    labels = [f" {'● ' if other.state()[0] == 'running' else ''}{other.name} " for other in runners]
+    start = 4 + len("log") + 2
+    room = width - 2 - start - (len(right_text) + 5 if right_text else 1)
+    first, last = fit_tabs([len(label) for label in labels], shown, max(room, len(labels[shown])))
+    x = start
+    for index in range(first, last + 1):
+        canvas.put(y, x, labels[index], "pop-on" if index == shown else "label")
+        x += len(labels[index]) + 1
     lines = [line for line in runner.tail() if line.strip()][-(height - 2):] if height > 2 else []
     for at, line in enumerate(lines, start=y + 1):
         style = ("bad" if "Failed" in line else "good" if "Succeeded" in line
@@ -297,7 +327,7 @@ def footer(canvas, y, width, note, picking=None):
     # h are not listed: they still work, and the menu names them. Where the width is short, the
     # first three here stay (move, back, quit) and the others go from the right.
     leave = "quit, runners stay on" if width >= 100 else "quit"
-    general = (("m", "settings"), ("s", "start"), ("x", "stop"), ("tab", "next log"), ("q", leave))
+    general = (("m", "settings"), ("s", "start"), ("x", "stop"), ("←→", "logs"), ("q", leave))
     keys = {"run": (("↑↓", "choose"), ("c", "cancel"), ("r", "run again"), ("o", "open"), ("esc", "back")) + general,
             "request": (("↑↓", "choose"), ("enter", "start"), ("d", "decline"), ("esc", "back")) + general,
             "dialog": (("y", "yes"), ("n", "no"), ("← →", "choose"), ("enter", "answer")),
@@ -359,7 +389,7 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
     if queue.runs and room >= 5:
         y = github_box(canvas, y, width, queue.runs[:max(1, min(len(queue.runs), room - 7))], cfg.repos, picked, queue.working)
     if runners and height - 1 - y >= 3:
-        log_box(canvas, y, width, height - 1 - y, runners[shown])
+        log_box(canvas, y, width, height - 1 - y, runners, shown)
     picking = (("field" if "field" in dialog else "dialog") if dialog else None if picked is None
                else "request" if picked < 0 else "run")
     if dialog:

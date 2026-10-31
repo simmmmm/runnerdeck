@@ -905,7 +905,7 @@ def footer_text(width, picking):
 
 for picking in ("run", "request", None):
     wide = footer_text(190, picking)
-    for key in ("q quit", "m settings", "s start", "x stop", "tab next log"):
+    for key in ("q quit", "m settings", "s start", "x stop", "←→ logs"):
         assert key in wide, (picking, key, wide)
     for key in ("n new runner", "w approval", "h add computer"):             # these are in the settings, not on the line
         assert key not in wide, (picking, key, wide)
@@ -1075,6 +1075,45 @@ with tempfile.TemporaryDirectory() as data:
         os.environ["RUNNERDECK_DATA"] = saved
     assert "built here" in shown and "builds · workshop" in shown and "built there" in shown, shown
 assert "builds" not in drawn(two, nothing, []).replace("builds ·", "x")           # nothing recorded: no box, nothing said
+
+# --- the logs: every runner a tab on the top edge, the one shown on white, the others grey, a dot where a job runs
+class Recorder:
+    """A canvas that keeps what is put on it and in which style, to see what is drawn how."""
+
+    def __init__(self, height, width):
+        self.height, self.width, self.puts = height, width, []
+
+    def put(self, y, x, text, style=""):
+        self.puts.append((y, x, text, style))
+
+
+def a_runner(name, running=False):
+    return _types.SimpleNamespace(name=name, state=lambda: ("running" if running else "listening", "", None, ""),
+                                  tail=lambda: [f"{name} says one thing", f"{name} says another"])
+
+
+crew = [a_runner("mac"), a_runner("mac-2", running=True), a_runner("mac-3")]
+for shown_index in (0, 1, 2):
+    rec = Recorder(10, 100)
+    boxes.log_box(rec, 0, 100, 8, crew, shown_index)
+    tabs = [(text.strip(), style) for y, x, text, style in rec.puts if y == 0 and style in ("pop-on", "label") and text.strip() in
+            ("mac", "● mac-2", "mac-3")]
+    assert [t for t, _ in tabs] == ["mac", "● mac-2", "mac-3"], tabs                       # all of them, side by side, a dot where a job runs
+    assert [style for _, style in tabs] == ["pop-on" if i == shown_index else "label" for i in range(3)], (shown_index, tabs)
+    lines = [text for y, x, text, style in rec.puts if y > 0 and "says" in text]
+    assert all(crew[shown_index].name in line for line in lines), lines                    # the log is of the one shown
+    xs = [x for y, x, text, style in rec.puts if y == 0 and text.strip() in ("mac", "● mac-2", "mac-3")]
+    assert xs == sorted(xs) and len(set(xs)) == 3
+# many runners in a narrow box: the shown one is always there
+many = [a_runner(f"runner-{n}") for n in range(1, 13)]
+for shown_index in (0, 5, 11):
+    rec = Recorder(10, 60)
+    boxes.log_box(rec, 0, 60, 8, many, shown_index)
+    drawn_tabs = [(text.strip(), style) for y, x, text, style in rec.puts if y == 0 and style in ("pop-on", "label")]
+    assert (f"runner-{shown_index + 1}", "pop-on") in drawn_tabs, drawn_tabs
+    assert all(x + len(text) <= 60 for y, x, text, style in rec.puts if y == 0), rec.puts
+assert boxes.fit_tabs([6, 6, 6, 6], 2, 14) == (1, 2) or boxes.fit_tabs([6, 6, 6, 6], 2, 14)[0] <= 2 <= boxes.fit_tabs([6, 6, 6, 6], 2, 14)[1]
+assert boxes.fit_tabs([30, 6], 0, 10) == (0, 0)                                        # one that is too long alone is still shown
 
 # --- one file from the package: it runs, and what it starts again (the watcher) finds itself
 with tempfile.TemporaryDirectory() as tmp:

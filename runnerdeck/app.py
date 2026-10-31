@@ -232,8 +232,10 @@ def show(window, cfg, runners, queue, machine, pcs=()):
                 dialog = ask("Stop", f"Stop them? {', '.join(busy)} would fail its job", "Stop", "Keep running", stop)
             else:
                 stop()
-        elif key == 9 and runners:
+        elif key in (9, K_RIGHT) and runners:
             shown = (shown + 1) % len(runners)
+        elif key == K_LEFT and runners:
+            shown = (shown - 1) % len(runners)
         elif key == ord("s"):
             window.leave()
             start_all(cfg, runners)

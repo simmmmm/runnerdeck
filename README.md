@@ -72,7 +72,7 @@ service = actions-runner.service
 | `w` | Choose again which workflows wait for your yes (also in the settings). |
 | `h` | Add a computer to watch over SSH (also in the settings). |
 | `s` / `x` | Start / stop the runners. |
-| `Tab` | Show the log of the next runner. |
+| `←` `→` or `Tab` | Switch to the log of another runner. All runners are tabs above the log. |
 | `↑` `↓` | Choose a run. |
 | `c` `r` `o` | Cancel, repeat, or open the chosen run. |
 
