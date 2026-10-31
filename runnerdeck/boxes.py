@@ -264,6 +264,12 @@ def builds_box(canvas, y, width, builds, title="builds"):
 def requests_box(canvas, y, width, requests, picked=None, working=None, labels=None):
     working = working or {}
     frame(canvas, y, 0, 2 + len(requests), width, "waiting for you", "a: start · d: decline")
+    # The columns follow the names: "Publish Linux" and "Publish Apple" must not be cut to the same twelve letters.
+    plain = [r for r in requests if not r.get("kind")]
+    name_w = min(24, max([12] + [len(r["workflow"]) for r in plain]))
+    branch_at = 4 + name_w + 1
+    sha_at = branch_at + min(24, max([12] + [len(r["branch"]) for r in plain])) + 1
+    note_at = sha_at + 8
     for line, request in enumerate(requests, start=y + 1):
         chosen = row_of(request) == picked
         doing = working.get(row_of(request))
@@ -275,11 +281,11 @@ def requests_box(canvas, y, width, requests, picked=None, working=None, labels=N
             # A kind of the config's own: what the issue said, as it is.
             canvas.put(line, 4, request["what"][:44], "picked" if chosen else "strong")
         else:
-            canvas.put(line, 4, request["workflow"][:12], "picked" if chosen else "strong")
-            canvas.put(line, 17, request["branch"][:24], "picked" if chosen else "dim")
-            canvas.put(line, 42, request["sha"][:7], "picked" if chosen else "dim")
+            canvas.put(line, 4, request["workflow"][:name_w], "picked" if chosen else "strong")
+            canvas.put(line, branch_at, request["branch"][:sha_at - branch_at - 1], "picked" if chosen else "dim")
+            canvas.put(line, sha_at, request["sha"][:7], "picked" if chosen else "dim")
         words = f"{doing}…" if doing else request["note"]
-        at = 50
+        at = note_at if not request.get("kind") else 50
         if labels:
             name = labels.get(request["repo"], request["repo"])[:20]
             canvas.put(line, at, name, "picked" if chosen else "dim")
