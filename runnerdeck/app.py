@@ -286,15 +286,28 @@ def install():
     with open(launcher, "w") as file:
         file.write(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$HOME/runnerdeck.pyz" "$@"\n')
     os.chmod(launcher, 0o755)
-    # zsh reads .zshenv every time it starts, with a terminal or without; bash, .bashrc.
-    shell_file = os.path.expanduser("~/.zshenv" if os.path.basename(os.environ.get("SHELL", "")) == "zsh" else "~/.bashrc")
-    line = 'export PATH="$HOME/.local/bin:$PATH"'
-    if ".local/bin" in read(shell_file):
-        said = f"{shell_file} has ~/.local/bin on the PATH already."
+    # zsh reads .zshenv every time it starts, with a terminal or without; bash, .bashrc; fish reads every
+    # file in conf.d (CachyOS and others have fish as the shell: it reads neither of the other two).
+    shell = os.path.basename(os.environ.get("SHELL", ""))
+    if shell == "fish":
+        shell_file = os.path.expanduser("~/.config/fish/conf.d/runnerdeck.fish")
+        line = 'fish_add_path -g "$HOME/.local/bin"'
+        if os.path.exists(shell_file):
+            said = f"{shell_file} is there already."
+        else:
+            os.makedirs(os.path.dirname(shell_file), exist_ok=True)
+            with open(shell_file, "w") as file:
+                file.write(f"# runnerdeck: its command is in ~/.local/bin\n{line}\n")
+            said = f"Made {shell_file}: {line}"
     else:
-        with open(shell_file, "a") as file:
-            file.write(f"\n# runnerdeck: its command is in ~/.local/bin\n{line}\n")
-        said = f"Added to {shell_file}: {line}"
+        shell_file = os.path.expanduser("~/.zshenv" if shell == "zsh" else "~/.bashrc")
+        line = 'export PATH="$HOME/.local/bin:$PATH"'
+        if ".local/bin" in read(shell_file):
+            said = f"{shell_file} has ~/.local/bin on the PATH already."
+        else:
+            with open(shell_file, "a") as file:
+                file.write(f"\n# runnerdeck: its command is in ~/.local/bin\n{line}\n")
+            said = f"Added to {shell_file}: {line}"
     return (f"Open a new terminal window. Then type: runnerdeck\n(Or now: {launcher})\n{said}\n"
             f"The command is {launcher}; the program is in {target}.")
 

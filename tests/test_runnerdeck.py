@@ -815,6 +815,12 @@ if not system.WINDOWS:
             assert ran.returncode == 0 and "runnerdeck" in ran.stdout, (ran.returncode, ran.stderr)
             second = app.install()
             assert "already" in second and "Added to" not in second and open(shell_file).read().count('export PATH="$HOME/.local/bin') == 1
+            # fish reads neither: its own file, in conf.d, which it reads every time
+            os.environ["SHELL"] = "/usr/bin/fish"
+            third = app.install()
+            fish_file = os.path.join(home, ".config", "fish", "conf.d", "runnerdeck.fish")
+            assert "Made " + fish_file in third and 'fish_add_path -g "$HOME/.local/bin"' in open(fish_file).read(), third
+            assert "already" in app.install() and open(fish_file).read().count("fish_add_path") == 1
         finally:
             for key, value in saved.items():
                 if value is None:
