@@ -7,13 +7,14 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import zipfile
 from .util import read
 from .system import WINDOWS
 from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, runner_rows, set_computer, set_section
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
 from .github import Queue, act_on_run, approve, close, failed_log, row_of
-from .update import remember, update
+from .update import behind, remember, update
 from .machines import Pc, RemoteMac, build_machines, probe
 from .terminal import ConsoleTerminal, CursesTerminal, ENTER, Grid, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
 from .boxes import paint, with_remote
@@ -23,6 +24,13 @@ from .setup import Wizard, menu, run as run_setup, show_text
 
 def show(window, cfg, runners, queue, machine, pcs=()):
     colours()
+
+    def watch_for_update():
+        """Every few hours, once: whether the clone is behind main. It only looks."""
+        while True:
+            queue.update_ready = behind()
+            time.sleep(3 * 3600)
+    threading.Thread(target=watch_for_update, daemon=True).start()
     # By its row, not its place: the list moves as runs come in.
     shown, note, picked, dialog = 0, "", None, None
 
@@ -160,7 +168,9 @@ def show(window, cfg, runners, queue, machine, pcs=()):
 
     def update_here():
         nonlocal note
-        note = update()[1]
+        done, note = update()
+        if done:
+            queue.update_ready = False
 
     def builds_help():
         nonlocal note
@@ -282,6 +292,12 @@ def show(window, cfg, runners, queue, machine, pcs=()):
             runner_dialog()
         elif key == ord("m"):
             settings()
+        elif key == ord("u"):
+            note = "Updating…"
+            done, said = update()
+            note = said
+            if done:
+                queue.update_ready = False
 
 
 def build(target):

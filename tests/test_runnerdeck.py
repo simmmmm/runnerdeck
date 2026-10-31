@@ -1595,6 +1595,16 @@ assert not updatemod.update()[0] and "not on main" in updatemod.update()[1]
 _git(_clone, "checkout", "-q", "main"); open(os.path.join(_clone, "b"), "w").write("x"); _git(_clone, "add", "b"); _git(_clone, "commit", "-qm", "mine")
 _ok, _said = updatemod.update()
 assert not _ok and "apart" in _said and open(os.path.join(_clone, "b")).read() == "x"
+# behind: only when origin has what the clone has not; a clone with commits of its own is not behind
+updatemod.PYZ = os.path.join(_base, "installed.pyz")
+_git(_clone, "reset", "-q", "--hard", "origin/main")
+assert not updatemod.behind()
+open(os.path.join(_other, "a"), "w").write("4"); _git(_other, "commit", "-qam", "four"); _git(_other, "push", "-q", "origin", "main")
+assert updatemod.behind()
+_git(_clone, "fetch", "-q", "origin", "main"); _git(_clone, "merge", "-q", "--ff-only", "FETCH_HEAD")
+open(os.path.join(_clone, "c"), "w").write("mine"); _git(_clone, "add", "c"); _git(_clone, "commit", "-qm", "own")
+assert not updatemod.behind()
+_git(_clone, "reset", "-q", "--hard", "HEAD~1")
 # the installed copy: it rebuilds itself from the clone that it was installed from, and knows that clone
 open(updatemod.PYZ, "w").write("old")
 assert not zipfile.is_zipfile(updatemod.PYZ)

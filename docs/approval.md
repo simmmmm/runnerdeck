@@ -81,3 +81,5 @@ A section that is wrong makes the config invalid, and the program says which lin
 ## Why did a run fail?
 
 Choose the run and press `l`: the end of what its failed steps wrote opens on the screen, as GitHub keeps it. `o` opens the run in the browser.
+
+Every few hours the screen looks, without changing anything, whether the clone is behind `main`. If it is, the head says `update ready · u`. Press `u` to update.

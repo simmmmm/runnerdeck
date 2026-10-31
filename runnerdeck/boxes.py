@@ -198,16 +198,22 @@ def github_box(canvas, y, width, runs, repos, picked=None, working=None):
     # runs shown happen to be of both.
     many = len(repos) > 1
     labels = repo_labels(repos)
+    # The columns follow the names: "Publish Linux" and "Publish Apple" must not be cut to the same twelve letters.
+    name_w = min(24, max([12] + [len(run.get("workflowName", "")) for run in runs]))
+    branch_w = min(24, max([8] + [len(run.get("headBranch", "")) for run in runs]))
+    branch_at = 4 + name_w + 1
+    sha_at = branch_at + branch_w + 1
+    repo_at = sha_at + 8
     frame(canvas, y, 0, 2 + len(runs), width, "github", ", ".join(repos) if len(", ".join(repos)) < width - 16 else f"{len(repos)} repositories")
     for line, run in enumerate(runs, start=y + 1):
         doing = working.get(run.get("databaseId"))
         if run.get("databaseId") == picked:
             canvas.put(line, 1, "▸" + " " * (width - 3), "picked")
-            canvas.put(line, 4, run.get("workflowName", "")[:12], "picked")
-            canvas.put(line, 17, run.get("headBranch", "")[:24], "picked")
-            canvas.put(line, 42, run.get("headSha", "")[:7], "picked")
+            canvas.put(line, 4, run.get("workflowName", "")[:name_w], "picked")
+            canvas.put(line, branch_at, run.get("headBranch", "")[:branch_w], "picked")
+            canvas.put(line, sha_at, run.get("headSha", "")[:7], "picked")
             if many:
-                canvas.put(line, 50, labels.get(run.get("repo"), run.get("repo", ""))[:20], "picked")
+                canvas.put(line, repo_at, labels.get(run.get("repo"), run.get("repo", ""))[:20], "picked")
             word = f"{doing}…" if doing else run.get("conclusion") or (run.get("status") or "").replace("_", " ")
             right(canvas, line, width, f"{word} · {ago(moment(run.get('createdAt', ''), STAMP))}", "picked")
             continue
@@ -216,11 +222,11 @@ def github_box(canvas, y, width, runs, repos, picked=None, working=None):
         mark = RESULTS.get(conclusion, "·") if done else "…" if run.get("status") == "in_progress" else "·"
         style = {"success": "good", "failure": "bad"}.get(conclusion, "dim") if done else "warm"
         canvas.put(line, 2, mark, style)
-        canvas.put(line, 4, run.get("workflowName", "")[:12], "strong" if not done else "plain")
-        canvas.put(line, 17, run.get("headBranch", "")[:24], "dim")
-        canvas.put(line, 42, run.get("headSha", "")[:7], "dim")
+        canvas.put(line, 4, run.get("workflowName", "")[:name_w], "strong" if not done else "plain")
+        canvas.put(line, branch_at, run.get("headBranch", "")[:branch_w], "dim")
+        canvas.put(line, sha_at, run.get("headSha", "")[:7], "dim")
         if many:
-            canvas.put(line, 50, labels.get(run.get("repo"), run.get("repo", ""))[:20], "dim")
+            canvas.put(line, repo_at, labels.get(run.get("repo"), run.get("repo", ""))[:20], "dim")
         word = f"{doing}…" if doing else conclusion if done else (run.get("status") or "").replace("_", " ")
         when = ago(moment(run.get("createdAt", ""), STAMP))
         right(canvas, line, width, f"{word} · {when}", "warm" if doing else style if style != "dim" else "label")
@@ -387,6 +393,8 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
     told = " · notifying" if alive(cfg.watch) else ""
     if runners:
         right(canvas, 0, width + 1, f"{awake}{told}", "good" if alive(cfg.awake) else "warm")
+    if getattr(queue, "update_ready", False):
+        right(canvas, 0, width - (len(awake) + len(told) + 4 if runners else 0) + 1, "update ready · u", "warm")
     y = 1
     if machine:
         y = mac_box(canvas, y, width, machine)

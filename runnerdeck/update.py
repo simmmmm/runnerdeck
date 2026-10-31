@@ -39,6 +39,24 @@ def git(clone, *args):
     return got.returncode, got.stdout.strip(), got.stderr.strip()
 
 
+def behind():
+    """Whether main of origin is ahead of the clone: only asked, nothing is changed. A clone with commits of its
+    own that is ahead of main is not behind."""
+    clone = clone_dir()
+    if not clone:
+        return False
+    try:
+        code, listed, _ = git(clone, "ls-remote", "origin", "main")
+        remote = listed.split()[0] if code == 0 and listed else ""
+        if not remote:
+            return False
+        here = git(clone, "rev-parse", "HEAD")[1]
+        # Behind when the remote commit is neither the clone's own nor one that the clone already has.
+        return remote != here and git(clone, "merge-base", "--is-ancestor", remote, "HEAD")[0] != 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def rebuild(clone):
     """The installed copy made again from the clone, as it is now. Built beside it and put in its place in one
     step, so that a copy that is running is not cut under its own feet."""

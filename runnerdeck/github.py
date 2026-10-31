@@ -119,6 +119,8 @@ class Queue:
         self.runs = None
         self.jobs = {}
         self.requests = []
+        # Whether runnerdeck itself has a newer version (see update.behind); set by the screen.
+        self.update_ready = False
         # A thing being done, by its row (`row_of`), and what the row says
         # meanwhile; requests over (repository, issue), which GitHub's list may
         # still show; and what the last one came to, for the foot.
