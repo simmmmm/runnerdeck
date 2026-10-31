@@ -627,6 +627,27 @@ with tempfile.TemporaryDirectory() as tmp:
         runners.set_up, runners.Runner.start = real_setup, real_start
         setupmod.set_up = real_setup
 
+    # what was said of an answer goes when the answer is changed: a red line under a good answer is a lie
+    w = wizard_for()
+    answer(w); answer(w, "a/b"); answer(w, "1"); answer(w)
+    assert w.step == "dir"
+    answer(w, "")
+    assert w.step == "dir" and w.bad and w.note == "Write a folder."
+    w.feed(ord("~"))
+    assert w.note == "" and not w.bad                                        # typing takes it away
+    answer(w, "~/actions-runner")
+    assert w.step in ("token", "other") and not w.bad
+    w = wizard_for()
+    answer(w); answer(w, "xyz")
+    assert w.step == "repos" and w.bad
+    w.feed(127)
+    assert w.note == "" and not w.bad                                        # so does backspace
+    w = wizard_for(ssh=False)
+    answer(w); answer(w, "a/b"); answer(w, "0"); w.feed(ord("y")); answer(w, "me@pc")
+    assert "refuses" in w.note and not w.bad
+    w.feed(ord("x"))
+    assert w.note == "" and w.kept is False                                  # a warning goes with the address it was about
+
     # the shortest way: one repository, nothing else; and the old file is kept
     made.clear()
     w = wizard_for()

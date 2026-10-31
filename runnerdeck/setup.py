@@ -364,9 +364,11 @@ class Wizard:
                 self.submit()
             elif key in (8, 127, K_BACKSPACE):
                 self.field, self.kept, self.fresh = self.field[:-1], False, False
+                self.note, self.bad = "", False       # what was said was of what stood there before
             elif 32 <= key < 127:
                 self.field, self.kept = ("" if self.fresh else self.field) + chr(key), False
                 self.fresh = False
+                self.note, self.bad = "", False
 
     def submit(self):
         step, value = self.step, self.field.strip()
