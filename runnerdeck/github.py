@@ -18,7 +18,7 @@ def asked(cfg, issue, repo="", index=0, label=None):
     found = cfg.asked.match(title) if cfg.asked and label in (None, cfg.approval["label"]) else None
     if found:
         return {"number": issue["number"], "repo": repo, "row": row, "workflow": found[1], "branch": found[2],
-                "sha": found[3], "note": note, "kind": "", "ref": found[2], "inputs": {},
+                "sha": found[3], "note": note, "kind": "", "ref": found[2], "inputs": {}, "target": repo,
                 "what": f"{found[1]} from {found[2]} at {found[3][:7]}"}
     for kind in getattr(cfg, "kinds", ()):
         found = kind["title"].match(title) if label in (None, kind["label"]) else None
@@ -29,7 +29,7 @@ def asked(cfg, issue, repo="", index=0, label=None):
         # The inputs that the workflow gets: each a field of the title, which has been checked, or a plain word.
         inputs = {key: values.get(value[1:-1], value) if value.startswith("{") else value for key, value in kind["inputs"].items()}
         return {"number": issue["number"], "repo": repo, "row": row, "workflow": kind["workflow"], "branch": ref or "",
-                "sha": values.get("sha", ""), "note": note, "kind": kind["name"], "ref": ref, "inputs": inputs,
+                "sha": values.get("sha", ""), "note": note, "kind": kind["name"], "ref": ref, "inputs": inputs, "target": kind["repo"] or repo,
                 "what": title[:60]}
     return None
 
@@ -61,7 +61,7 @@ def row_of(item):
 def approve(request):
     """Starts the workflow asked for; what to say of it, and whether the
     request is over."""
-    repo, workflow, branch, sha = request["repo"], request["workflow"], request["ref"], request["sha"]
+    repo, workflow, branch, sha = request["target"], request["workflow"], request["ref"], request["sha"]
     if branch and sha and not still_at(repo, branch, sha):
         return f"{branch} is no longer at {sha[:7]}: nothing started", False
     # One each: a run started by hand, or the list of requests lagging behind

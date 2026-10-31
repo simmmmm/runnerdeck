@@ -65,6 +65,7 @@ REFERENCE = """\
 # mode = linux|apple|home        a field is one of these words, or: sha, version, branch
 # version = version
 # sha = sha
+# repo = owner/other             where the workflow is, when that is not the repository of the issue
 # ref = main                     the branch it starts from, or {branch} with a field of that name
 # input sha = {sha}              a workflow input, from a field or a plain word
 # input mode = {mode}
@@ -245,10 +246,14 @@ def request_kind(name, section):
         if not re.fullmatch(r"[A-Za-z0-9_-]+", input_name) or not (field and field[1] in fields or PLAIN.match(value)):
             raise bad(f"{key} = a {{field}} of the title, or a plain word")
         inputs[input_name] = value
+    # The workflow may be in another repository than the issue: the issue is a request, the repository a place.
+    target = section.get("repo", "").strip()
+    if target and not SLUG.match(target):
+        raise bad(f"repo = owner/name, not {target!r}")
     ref = section.get("ref", "").strip()
     if ref and not (re.fullmatch(r"\{branch\}", ref) and fields.get("branch") or PLAIN.match(ref)):
         raise bad("ref = a plain branch name, or {branch} when the title has a branch field")
-    return {"name": name, "label": label, "workflow": workflow, "ref": ref, "inputs": inputs, "fields": fields,
+    return {"name": name, "label": label, "workflow": workflow, "ref": ref, "repo": target, "inputs": inputs, "fields": fields,
             "title": re.compile("^" + regex + "$")}
 
 

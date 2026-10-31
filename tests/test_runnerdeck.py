@@ -1529,7 +1529,7 @@ assert machines.parse_pc("top 40 rustc\ntop 0 x\ntop 3 cargo\n")["top"] == [("ru
 _dir = tempfile.mkdtemp()
 _ini = os.path.join(_dir, "c.ini")
 _head = "[deck]\nrepos = a/b\n\n[request publish]\nlabel = publish-request\nworkflow = Publish\ntitle = Publish: {mode} {version} {sha}\n"
-_body = "mode = linux|apple|home\nversion = version\nsha = sha\nref = main\ninput sha = {sha}\ninput mode = {mode}\n"
+_body = "repo = c/d\nmode = linux|apple|home\nversion = version\nsha = sha\nref = main\ninput sha = {sha}\ninput mode = {mode}\n"
 open(_ini, "w").write(_head + _body)
 _cfg = configmod.load(_ini)
 _ask = lambda title, label=None: github.asked(_cfg, {"number": 51, "title": title, "body": "why\nmore"}, "a/b", 0, label)
@@ -1552,7 +1552,7 @@ try:
 finally:
     github.subprocess.run = _run
 _start = next(c for c in _calls if c[:3] == ["gh", "workflow", "run"])
-assert _over and _start == ["gh", "workflow", "run", "Publish", "--repo", "a/b", "--ref", "main", "-f", "sha=a0d3a70", "-f", "mode=linux"], _start
+assert _over and _start == ["gh", "workflow", "run", "Publish", "--repo", "c/d", "--ref", "main", "-f", "sha=a0d3a70", "-f", "mode=linux"], _start
 # a kind that is wrong is refused with a word about it
 for _text in (_head.replace("{mode} ", "{mode} {mode} ") + _body, _head + _body.replace("linux|apple|home", "li nux|a;b"),
               _head + _body.replace("input sha = {sha}", "input sha = {nothing}"), _head + _body.replace("ref = main", "ref = ma in; x"),
