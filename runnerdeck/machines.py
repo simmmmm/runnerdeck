@@ -642,5 +642,7 @@ def probe(host, kind="linux"):
     except Exception as err:
         parsed = None
         print(f"(it could not be read: {err})")
-    print("--- result:", "a usable answer" if parsed else "no usable answer")
+    print("--- result:", "a usable answer" if parsed and got.returncode == 0 and got.stdout.strip() else "no usable answer")
+    if got.returncode != 0:
+        print(explain_ssh(got.stderr, host))
     return 0
