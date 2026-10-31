@@ -14,6 +14,7 @@ from .github import Queue, act_on_run, approve, close, row_of
 from .machines import Pc, build_machines
 from .terminal import ConsoleTerminal, CursesTerminal, ENTER, Grid, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
 from .boxes import paint
+from .builds import run_recorded
 from .setup import Wizard, menu, run as run_setup
 
 
@@ -133,6 +134,10 @@ def show(window, cfg, runners, queue, machine, pcs=()):
         else:
             note = "Runners here need a [local] section in the config"
 
+    def builds_help():
+        nonlocal note
+        note = "Record a build that is not on GitHub:  runnerdeck run --name tests -- <command>   (docs/builds.md)"
+
     def config_file():
         nonlocal note
         note = f"Config file: {default_path()}  (read it with cat, or find it in your file manager)"
@@ -141,7 +146,8 @@ def show(window, cfg, runners, queue, machine, pcs=()):
         """Everything that can be changed, in one list. Each is also on a key of its own."""
         items = (("Add a runner on this machine  (n)", runner_dialog), ("Repositories: add or take out", repositories),
                  ("Workflows that wait for your yes  (w)", approval), ("Add a computer to watch  (h)", computer),
-                 ("Remove a computer", remove_computer), ("Where is the config file?", config_file))
+                 ("Remove a computer", remove_computer), ("Where is the config file?", config_file),
+                 ("How to record a build that is not on GitHub", builds_help))
         chosen = menu(window, "Settings", [label for label, _ in items])
         if chosen is not None:
             items[chosen][1]()
@@ -319,6 +325,9 @@ def main(args=None):
     locale.setlocale(locale.LC_ALL, "")
     if WINDOWS:
         sys.stdout.reconfigure(encoding="utf-8")
+    if args[:1] == ["run"]:
+        # A command that is run and recorded; no config is needed, and its own exit code is ours.
+        sys.exit(run_recorded(args[1:]))
     if "--help" in args or "-h" in args:
         print(sys.modules[__package__].__doc__)
         return

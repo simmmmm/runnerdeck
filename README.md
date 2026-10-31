@@ -23,6 +23,7 @@
 - It shows CPU, GPU, memory, and temperature of your machines. It reads a second computer over SSH.
 - It shows the last workflow runs of your repositories. You can cancel, repeat, or open a run.
 - The first time, it asks a few questions on the screen and writes the config file for you. It finds runners that are set up already.
+- It shows builds that are not on GitHub too, when you start them with `runnerdeck run -- <command>`. See [Builds](docs/builds.md).
 - You can add a new runner. You only paste the token.
 - You can keep a workflow behind your approval, and change which ones later. Approval is a request that you answer on the screen. It does not lock the workflow: see [Approval](docs/approval.md).
 
@@ -78,6 +79,7 @@ service = actions-runner.service
 ## More
 
 - [Config: all options, with examples](docs/config.md)
+- [Builds that are not on GitHub](docs/builds.md)
 - [Approval: keep a workflow behind your yes](docs/approval.md)
 - [Safety](docs/safety.md)
 - [Development: modules, tests, one-file build](docs/development.md)

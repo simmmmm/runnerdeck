@@ -1,5 +1,6 @@
 """What a machine is doing: a Mac through its own tools, a Linux machine (here or over ssh) through one script, Windows through the system's counters."""
 import ctypes
+import json
 import os
 import platform
 import re
@@ -8,6 +9,7 @@ import subprocess
 import threading
 import time
 from collections import deque
+from .builds import normalize
 from .util import clean, read
 from .system import WINDOWS
 from .config import HOST, load
@@ -158,6 +160,10 @@ fi
 for h in /sys/class/hwmon/hwmon*; do
     [ "$(cat "$h/name" 2>/dev/null)" = k10temp ] && echo "cpu_temp $(cat "$h/temp1_input" 2>/dev/null)"
 done
+echo "now $(date +%s)"
+ls -t "${RUNNERDECK_DATA:-$HOME/.local/share/runnerdeck}"/builds/*.json 2>/dev/null | head -n 8 | while IFS= read -r f; do
+    echo "build $(stat -c %Y "$f" 2>/dev/null) $(tr -d '\n' < "$f")"
+done
 echo "runner $([ -n "$1" ] && systemctl --user is-active "$1" 2>/dev/null)"
 echo log
 [ -n "$1" ] && journalctl --user -u "$1" -n 200 --no-pager -o cat 2>/dev/null
@@ -189,11 +195,13 @@ def parse_pc(said):
     """A machine's answer as numbers and names. A key it did not give is left out,
     and so is a number that is not one."""
     head, _, log = said.partition("\nlog\n")
-    got, stats = {}, []
+    got, stats, built = {}, [], []
     for line in head.splitlines():
         key, _, value = line.partition(" ")
         if key == "stat":
             stats.append(value.split()[1:])
+        elif key == "build":
+            built.append(value)
         else:
             got[key] = value.strip()
 
@@ -219,6 +227,17 @@ def parse_pc(said):
     used, size = number("vram_used", 2**30), number("vram_total", 2**30)
     now["vram"] = (used, size) if used is not None and size else None
     now["log"] = [clean(line) for line in log.splitlines()]
+    # The builds that were recorded there (runnerdeck run), judged by the clock of that machine.
+    clock = number("now") or time.time()
+    now["builds"] = []
+    for value in built:
+        stamp, _, blob = value.partition(" ")
+        try:
+            item = normalize(json.loads(blob), float(stamp), clock)
+        except ValueError:
+            continue
+        if item:
+            now["builds"].append(item)
     # An AMD card's own files first; NVIDIA's tool for what they left empty.
     for key, value in parse_nvidia(got.get("nvidia", "")).items():
         if now.get(key) is None:

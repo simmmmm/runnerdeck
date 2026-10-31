@@ -10,8 +10,10 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The records of builds that the screen reads are the test's own, never those of whoever runs it.
+os.environ["RUNNERDECK_DATA"] = tempfile.mkdtemp(prefix="runnerdeck-data-")
 sys.path.insert(0, ROOT)
-from runnerdeck import boxes, config as configmod, github, machines, runners, system, terminal
+from runnerdeck import boxes, builds, config as configmod, github, machines, runners, system, terminal
 
 
 def configured(text):
@@ -957,6 +959,123 @@ assert len(rows) == 2 and not any("alpha" in line for line in rows), rows       
 assert boxes.repo_labels(["a/app", "b/lib"]) == {"a/app": "app", "b/lib": "lib"}
 assert boxes.repo_labels(["a/app", "b/app", "c/lib"]) == {"a/app": "a/app", "b/app": "b/app", "c/lib": "lib"}
 
+# --- builds that are not on GitHub: run as they are, recorded, read, and drawn
+import json
+import threading
+
+with tempfile.TemporaryDirectory() as data:
+    env = dict(os.environ, RUNNERDECK_DATA=data)
+    # the command runs as it is: its output goes through and its exit code is ours
+    out = subprocess.run([sys.executable, "-m", "runnerdeck", "run", "--name", "a test", "--", sys.executable, "-c",
+                          "print('hello'); raise SystemExit(3)"], env=env, cwd=ROOT, capture_output=True, text=True)
+    assert out.returncode == 3 and out.stdout == "hello\n", out
+    found = builds.recent(root=data)
+    assert len(found) == 1 and found[0]["name"] == "a test" and found[0]["status"] == "failure" and found[0]["code"] == 3
+    assert found[0]["end"] >= found[0]["start"] and found[0]["host"] and "raise SystemExit(3)" in found[0]["cmd"]
+    assert builds.record([sys.executable, "-c", "pass"], root=data) == 0
+    assert builds.record(["no-such-command-xyz-123"], root=data) == 127
+    by_status = [item["status"] for item in builds.recent(root=data)]
+    assert sorted(by_status) == ["failure", "failure", "success"], by_status
+    assert builds.default_name(["cargo", "test", "--workspace"]) == "cargo test"
+    assert builds.default_name(["dev/check.sh"]) == "check.sh" and builds.default_name(["make", "-j8"]) == "make"
+    assert builds.default_name(["python3", "some/long/path.py"]) == "python3"
+    assert subprocess.run([sys.executable, "-m", "runnerdeck", "run"], env=env, cwd=ROOT, capture_output=True).returncode == 2
+
+    # a build that is still running, one that was interrupted, and one that was stopped
+    now_t = time.time()
+    path = os.path.join(builds.folder(data), "live.json")
+    builds.write(path, {"id": "live", "name": "live", "start": now_t - 5, "end": None, "code": None})
+    assert [i["status"] for i in builds.recent(root=data) if i["name"] == "live"] == ["running"]
+    os.utime(path, (now_t - 600, now_t - 600))                                     # nobody touched it for ten minutes
+    assert [i["status"] for i in builds.recent(root=data) if i["name"] == "live"] == ["interrupted"]
+    builds.write(path, {"id": "live", "name": "live", "start": now_t - 5, "end": now_t, "code": 130})
+    assert [i["status"] for i in builds.recent(root=data) if i["name"] == "live"] == ["cancelled"]
+    os.remove(path)
+
+    # a build that runs is touched, so that it stays running; a record that is not one is not shown
+    first = []
+
+    def long_build():
+        first.append(builds.record([sys.executable, "-c", "import time; time.sleep(1.2)"], name="slow", root=data, beat=0.1))
+    runner_thread = threading.Thread(target=long_build)
+    runner_thread.start()
+    time.sleep(0.4)
+    slow = [f for f in os.listdir(builds.folder(data)) if f.endswith(".json") and "slow" in open(os.path.join(builds.folder(data), f)).read()]
+    stamp_early = os.stat(os.path.join(builds.folder(data), slow[0])).st_mtime
+    time.sleep(0.5)
+    assert os.stat(os.path.join(builds.folder(data), slow[0])).st_mtime > stamp_early
+    assert [i["status"] for i in builds.recent(root=data) if i["name"] == "slow"] == ["running"]
+    runner_thread.join()
+    assert [i["status"] for i in builds.recent(root=data) if i["name"] == "slow"] == ["success"] and first == [0]
+    open(os.path.join(builds.folder(data), "junk.json"), "w").write("not json")
+    open(os.path.join(builds.folder(data), "other.json"), "w").write(json.dumps({"name": 5}))
+    assert all(item["name"] != "junk" for item in builds.recent(root=data))
+    assert builds.normalize("x", 0, 0) is None and builds.normalize({"name": 5}, 0, 0) is None
+    assert builds.normalize({"name": "x\x1b[2J", "start": "soon", "code": True}, 0, 0)["name"] == "x[2J"   # nothing that moves the cursor
+    # only the latest are kept
+    for number in range(builds.KEEP + 9):
+        builds.write(os.path.join(builds.folder(data), f"old-{number:03}.json"), {"id": str(number), "name": "old", "start": 1.0, "end": 2.0, "code": 0})
+        os.utime(os.path.join(builds.folder(data), f"old-{number:03}.json"), (1000 + number, 1000 + number))
+    builds.prune(builds.folder(data))
+    assert len([f for f in os.listdir(builds.folder(data)) if f.endswith(".json")]) == builds.KEEP
+
+# a computer over ssh tells of its builds, as that computer's clock sees them
+said_builds = ("now 5000\nbuild 4990 " + json.dumps({"id": "a", "name": "tests", "start": 4000.0, "end": None, "code": None, "branch": "main", "sha": "abc"})
+               + "\nbuild 3000 " + json.dumps({"id": "b", "name": "check", "start": 2900.0, "end": 3000.0, "code": 0})
+               + "\nbuild 2000 not json\nbuild x {}\nlog\n")
+got = machines.parse_pc(said_builds)["builds"]
+assert [(b["name"], b["status"]) for b in got] == [("tests", "running"), ("check", "success")], got
+assert machines.parse_pc("")["builds"] == []
+if sys.platform.startswith("linux"):                                          # the real script, reading real files
+    with tempfile.TemporaryDirectory() as data:
+        builds.record([sys.executable, "-c", "pass"], name="seen by the script", root=data)
+        saved = os.environ.get("RUNNERDECK_DATA")
+        os.environ["RUNNERDECK_DATA"] = data
+        try:
+            mine = machines.ask_pc(None, "")
+        finally:
+            os.environ["RUNNERDECK_DATA"] = saved
+        assert [(b["name"], b["status"]) for b in mine["builds"]] == [("seen by the script", "success")], mine["builds"]
+
+# the box, and where it is on the screen
+import types as _types
+t0 = time.time()
+
+
+def a_build(name, status, start, end=None, code=None):
+    return {"id": name, "name": name, "status": status, "start": start, "end": end, "code": code, "branch": "main", "sha": "abcdef1",
+            "cmd": "", "cwd": "", "host": "pc"}
+
+
+sample = [a_build("old", "failure", t0 - 9000, t0 - 8700, 1), a_build("now", "running", t0 - 120), a_build("ok", "success", t0 - 500, t0 - 400, 0),
+          a_build("stopped", "cancelled", t0 - 700, t0 - 690, 130)]
+grid = terminal.Grid(8, 100)
+boxes.builds_box(grid, 0, 100, sample)
+lines = grid.text().splitlines()
+assert "1 running" in lines[0] and lines[1].lstrip("│ ").startswith("…") and "now" in lines[1] and "running" in lines[1]   # what runs, first
+assert any("✓" in line and "ok" in line and "succeeded in" in line for line in lines)
+assert any("✗" in line and "old" in line and "failed in" in line for line in lines)
+assert any("–" in line and "stopped" in line and "cancelled" in line for line in lines)
+grid = terminal.Grid(5, 100)
+boxes.builds_box(grid, 0, 100, [sample[0]])
+assert "not on GitHub" in grid.text() and "running" not in grid.text().splitlines()[0]
+assert boxes.span(40) == "40 s" and boxes.span(600) == "10 min"
+# in the screen: this computer's builds, and a computer over ssh with its own box
+with tempfile.TemporaryDirectory() as data:
+    builds.record([sys.executable, "-c", "pass"], name="built here", root=data)
+    saved = os.environ["RUNNERDECK_DATA"]
+    os.environ["RUNNERDECK_DATA"] = data
+    try:
+        pc_with = _types.SimpleNamespace(failed=False, reachable=lambda: True, name="workshop", host="me@w", service="x", cpu=[1.0], gpu=[],
+                                         state=lambda: ("listening", "", None, ""),
+                                         now={"cpu": 1.0, "gpu": None, "load": 0.5, "threads": 4.0, "memory": (1.0, 8.0), "runner": "active",
+                                              "log": [], "builds": [a_build("built there", "success", t0 - 60, t0 - 30, 0)]})
+        shown = drawn(two, nothing, [pc_with], width=110)
+    finally:
+        os.environ["RUNNERDECK_DATA"] = saved
+    assert "built here" in shown and "builds · workshop" in shown and "built there" in shown, shown
+assert "builds" not in drawn(two, nothing, []).replace("builds ·", "x")           # nothing recorded: no box, nothing said
+
 # --- one file from the package: it runs, and what it starts again (the watcher) finds itself
 with tempfile.TemporaryDirectory() as tmp:
     from runnerdeck import app
@@ -981,4 +1100,6 @@ with tempfile.TemporaryDirectory() as tmp:
     lines = started.stdout.split()
     assert started.returncode == 0 and lines[0] != "None" and lines[1] == "None", (started.stdout, started.stderr)
 
+import shutil as _shutil
+_shutil.rmtree(os.environ["RUNNERDECK_DATA"], ignore_errors=True)
 print("ok")

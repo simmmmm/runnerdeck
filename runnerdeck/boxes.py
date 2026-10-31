@@ -2,6 +2,7 @@
 import os
 import time
 from .util import STAMP, ago, moment
+from .builds import recent as recent_builds
 from .system import alive
 from .github import row_of
 from .machines import power, run, watts
@@ -223,6 +224,36 @@ def github_box(canvas, y, width, runs, repos, picked=None, working=None):
     return y + 2 + len(runs)
 
 
+BUILD_MARKS = {"running": ("…", "warm"), "success": ("✓", "good"), "failure": ("✗", "bad"),
+               "cancelled": ("–", "dim"), "interrupted": ("–", "dim")}
+
+
+def span(seconds):
+    return f"{round(seconds)} s" if seconds < 90 else f"{round(seconds / 60)} min"
+
+
+def builds_box(canvas, y, width, builds, title="builds"):
+    """Builds that did not go through GitHub, as a runner's rows are: what runs now first, then the latest,
+    each with how it ended, how long it took and how long ago."""
+    shown = sorted(builds, key=lambda b: (b["status"] != "running", -(b["start"] or 0)))[:5]
+    busy = sum(1 for b in shown if b["status"] == "running")
+    frame(canvas, y, 0, 2 + len(shown), width, title, f"{busy} running" if busy else "not on GitHub")
+    for line, build in enumerate(shown, start=y + 1):
+        mark, style = BUILD_MARKS[build["status"]]
+        running = build["status"] == "running"
+        canvas.put(line, 2, mark, style)
+        canvas.put(line, 4, build["name"][:18], "strong" if running else "plain")
+        canvas.put(line, 23, build["branch"][:20], "dim")
+        canvas.put(line, 44, build["sha"][:7], "dim")
+        if running:
+            word, when = "running", ago(build["start"])
+        else:
+            took = f" in {span(build['end'] - build['start'])}" if build["end"] and build["start"] else ""
+            word, when = {"success": "succeeded", "failure": "failed"}.get(build["status"], build["status"]) + took, ago(build["end"])
+        right(canvas, line, width, f"{word} · {when}", style if style != "dim" else "label")
+    return y + 2 + len(shown)
+
+
 def requests_box(canvas, y, width, requests, picked=None, working=None, labels=None):
     working = working or {}
     frame(canvas, y, 0, 2 + len(requests), width, "waiting for you", "a: start · d: decline")
@@ -311,6 +342,12 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
         canvas.put(0, 15, "· " + ", ".join(down) + " not answering", "dim")
     if runners:
         y = runners_box(canvas, y, width, runners, queue)
+    here = recent_builds()
+    if here:
+        y = builds_box(canvas, y, width, here, "builds")
+    for pc in pcs:
+        if pc.reachable() and pc.now.get("builds"):
+            y = builds_box(canvas, y, width, pc.now["builds"], f"builds · {pc.name}")
     if queue.requests:
         y = requests_box(canvas, y, width, queue.requests, picked, queue.working,
                          repo_labels(cfg.repos) if len(cfg.repos) > 1 else None)
