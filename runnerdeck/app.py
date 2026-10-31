@@ -306,10 +306,23 @@ def terminal(work):
             return work(console)
     if curses is None:
         sys.exit("runnerdeck: this Python has no curses")
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        sys.exit("runnerdeck needs a terminal. Over ssh, ask for one: ssh -t host command")
+    # The terminal that is named (TERM) may not be known on this system: kitty, alacritty and foot are not
+    # on a Mac, and a login from such a PC brings their name along. The screen is drawn with the escape codes
+    # that every current terminal knows, so xterm-256color does for all of them.
+    try:
+        curses.setupterm(os.environ.get("TERM") or "unknown", sys.__stdout__.fileno())
+    except curses.error:
+        os.environ["TERM"] = "xterm-256color"
     # curses waits a second after an Esc to see whether an arrow key follows: that is the lag.
     # A key sends its whole sequence at once, so a few hundredths are enough.
     os.environ.setdefault("ESCDELAY", "25")
-    return curses.wrapper(lambda window: work(CursesTerminal(window)))
+    try:
+        return curses.wrapper(lambda window: work(CursesTerminal(window)))
+    except curses.error as err:
+        sys.exit(f"runnerdeck: the terminal does not work here ({err}; TERM={os.environ.get('TERM', '')}). "
+                 "Try: TERM=xterm-256color runnerdeck")
 
 
 def screen(*args):
@@ -324,7 +337,12 @@ def first_start():
 
 def main(args=None):
     args = sys.argv[1:] if args is None else args
-    locale.setlocale(locale.LC_ALL, "")
+    try:
+        locale.setlocale(locale.LC_ALL, "")
+    except locale.Error:
+        # The language setting of the computer one logs in from (C.UTF-8, nl_NL ...) may not exist here.
+        # Nothing on the screen depends on it: it is drawn as UTF-8 bytes whatever the setting is.
+        pass
     if WINDOWS:
         sys.stdout.reconfigure(encoding="utf-8")
     if args[:1] == ["run"]:

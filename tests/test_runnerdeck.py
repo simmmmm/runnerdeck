@@ -1115,6 +1115,53 @@ for shown_index in (0, 5, 11):
 assert boxes.fit_tabs([6, 6, 6, 6], 2, 14) == (1, 2) or boxes.fit_tabs([6, 6, 6, 6], 2, 14)[0] <= 2 <= boxes.fit_tabs([6, 6, 6, 6], 2, 14)[1]
 assert boxes.fit_tabs([30, 6], 0, 10) == (0, 0)                                        # one that is too long alone is still shown
 
+# --- a login from another computer brings its terminal and its language along: neither may stop the screen
+if not system.WINDOWS:
+    import pty, select, fcntl, termios, struct
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "gh"), "w") as file:
+            file.write("#!/bin/sh\nexit 1\n")
+        os.chmod(os.path.join(tmp, "gh"), 0o755)
+        with open(os.path.join(tmp, "c.ini"), "w") as file:
+            file.write("[deck]\nrepos = a/b\n")
+
+        def screen_with(settings, tty=True):
+            """Starts the program in a terminal with these settings in its environment; what it drew, or what it said."""
+            env = dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"], HOME=tmp, RUNNERDECK_CONFIG=os.path.join(tmp, "c.ini"),
+                       RUNNERDECK_HOME=tmp, PYTHONPATH=ROOT, **settings)
+            if not tty:
+                got = subprocess.run([sys.executable, "-m", "runnerdeck"], env=env, cwd=tmp, stdin=subprocess.DEVNULL,
+                                     capture_output=True, text=True, timeout=30)
+                return got.returncode, got.stderr
+            pid, fd = pty.fork()
+            if pid == 0:
+                os.chdir(tmp)
+                os.execvpe(sys.executable, [sys.executable, "-m", "runnerdeck"], env)
+            fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+            seen, end = "", time.time() + 6
+            while time.time() < end and "◐ runnerdeck" not in seen and "Error" not in seen:
+                ready, _, _ = select.select([fd], [], [], 0.1)
+                if ready:
+                    try:
+                        seen += os.read(fd, 65536).decode("utf-8", "replace")
+                    except OSError:
+                        break
+            os.write(fd, b"qq")
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+            os.waitpid(pid, 0)
+            return seen
+
+        for settings in ({"TERM": "xterm-256color", "LANG": "C.UTF-8"}, {"TERM": "no-such-terminal-xyz", "LANG": "C.UTF-8"},
+                         {"TERM": "", "LANG": "C.UTF-8"}, {"TERM": "xterm-256color", "LC_ALL": "zz_ZZ.UTF-8"},
+                         {"TERM": "no-such-terminal-xyz", "LC_ALL": "zz_ZZ.UTF-8", "LANG": "zz_ZZ.UTF-8"}):
+            shown = screen_with(settings)
+            assert "◐ runnerdeck" in shown and "Traceback" not in shown, (settings, shown[-300:])
+        code, said = screen_with({"TERM": "xterm-256color"}, tty=False)               # ssh without -t: no terminal at all
+        assert code != 0 and "needs a terminal" in said and "ssh -t" in said and "Traceback" not in said, (code, said)
+
 # --- one file from the package: it runs, and what it starts again (the watcher) finds itself
 with tempfile.TemporaryDirectory() as tmp:
     from runnerdeck import app
