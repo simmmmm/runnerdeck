@@ -381,6 +381,10 @@ class Pc:
             return "stopped", "", None, ""
         return said_by(self.now.get("log", []))
 
+    def runner_list(self):
+        """The runner that runs as a service there, as a row of the runners box, named as the service."""
+        return [ServiceRunner(self)] if self.service else []
+
     def loop(self):
         while True:
             self.sample()
@@ -509,6 +513,16 @@ def ask_mac(host, runners):
         first = clean(next((line for line in got.stdout.splitlines() if line.strip()), ""))[:60]
         raise OSError("What came back is not the program's answer" + (f": {first}" if first else " (nothing)"))
     return answer
+
+
+class ServiceRunner:
+    """A runner that is a systemd service on a Linux machine: read as a folder runner is."""
+
+    def __init__(self, pc):
+        self.pc, self.name = pc, pc.service.replace(".service", "")[:8] or "runner"
+
+    def state(self):
+        return self.pc.state()
 
 
 class RemoteRunner:

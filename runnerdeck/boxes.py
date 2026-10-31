@@ -381,6 +381,9 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
                 y = runners_box(canvas, y, width, pc.runner_list(), queue, f"runners · {pc.name}")
         else:
             y = pc_box(canvas, y, width, pc)
+            rows = pc.runner_list() if hasattr(pc, "runner_list") else []
+            if rows:
+                y = runners_box(canvas, y, width, rows, queue, f"runners · {pc.name}")
     down = [pc for pc in pcs if getattr(pc, "failed", False) and not pc.reachable()]
     if down:
         words = "· " + ", ".join(pc.name for pc in down) + " not answering"
