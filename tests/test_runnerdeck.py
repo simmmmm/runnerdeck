@@ -1490,6 +1490,20 @@ open(os.path.join(_home, "run/_work/Numa-dev/Numa-dev/rust-toolchain.toml"), "w"
 assert rust_said() == "1.70.0 (not installed)", rust_said()
 __import__("shutil").rmtree(_home, ignore_errors=True)
 
+# the name of this computer on the screen can be set
+_dir = tempfile.mkdtemp()
+_ini = os.path.join(_dir, "c.ini")
+open(_ini, "w").write("[deck]\nrepos = a/b\ncomputer = linux\n")
+_cfg = configmod.load(_ini)
+assert _cfg.computer == "linux" and machines.build_machines(_cfg, once=False)[1][0].name == "linux"
+open(_ini, "w").write("[deck]\nrepos = a/b\ncomputer = a name far too long for it\n")
+try:
+    configmod.load(_ini)
+    raise SystemExit("a long computer name was accepted")
+except configmod.ConfigError:
+    pass
+__import__("shutil").rmtree(_dir, ignore_errors=True)
+
 # a computer that does not answer says why, in words, and a Mac's answer must be the program's own
 for said, word in (("ssh: connect to host 10.0.0.9 port 22: Connection refused", "SSH server"), ("", "did not connect")):
     assert word in machines.explain_ssh(said, "me@mac"), said

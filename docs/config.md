@@ -16,7 +16,7 @@ Press `m` for the settings. In one list you can add a runner, add or take out a 
 
 | Section | Use |
 |---|---|
-| `[deck]` | The repositories. Required. |
+| `[deck]` | The repositories. Required. `computer = linux` is optional: it is what this computer is called on the screen, in place of its network name (up to 12 characters). |
 | `[local]` | The runners on this machine. Leave it out if you only want to watch. |
 | `[host NAME]` | Another machine. One section for each machine. |
 | `[approval]` | Workflows that start only after you say yes. |

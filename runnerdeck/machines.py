@@ -600,7 +600,7 @@ def build_machines(cfg, once=False):
     here = Machine(once) if platform.system() == "Darwin" else None
     # This computer, if it is not a Mac: the service of its own runner, if the config says there is one.
     service = cfg.local["service"] if cfg.local else ""
-    pcs = [Pc(platform.node().split(".")[0][:12] or "here", None, service, once)] if here is None else []
+    pcs = [Pc(cfg.computer or platform.node().split(".")[0][:12] or "here", None, service, once)] if here is None else []
     others = [RemoteMac(host["name"], host["ssh"], host["runners"], once) if host["kind"] == "macos"
               else Pc(host["name"], host["ssh"], host["service"], once) for host in cfg.hosts]
     return here, pcs + others

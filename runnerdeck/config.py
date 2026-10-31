@@ -17,6 +17,8 @@ REFERENCE = """\
 # [deck]
 # The repositories. Runs and requests are read from these. Required.
 # repos = owner/name, owner/other
+# What this computer is called on the screen, in place of its network name (a Linux PC; up to 12 characters).
+# computer = linux
 #
 # [local]
 # The runners on this machine: name, name-2, name-3 in the folders dir, dir-2, dir-3.
@@ -77,6 +79,7 @@ class Config:
 
     def __init__(self):
         self.repos = []
+        self.computer = ""
         self.home = os.path.expanduser("~")
         self.local = None
         self.hosts = []
@@ -108,6 +111,9 @@ def configure(config):
         return [word.strip() for word in text.split(",") if word.strip()]
 
     cfg.repos = listed(config.get("deck", "repos", fallback=""))
+    cfg.computer = config.get("deck", "computer", fallback="").strip()
+    if cfg.computer and (not WORD.match(cfg.computer) or len(cfg.computer) > 12):
+        raise ConfigError(f"[deck] computer is a short name, up to 12 characters: {cfg.computer}")
     if not cfg.repos:
         raise ConfigError("[deck] repos is empty: repos = owner/name")
     for repo in cfg.repos:
