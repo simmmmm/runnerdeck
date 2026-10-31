@@ -76,7 +76,7 @@ A section that is wrong makes the config invalid, and the program says which lin
 
 ## Update the program
 
-`runnerdeck --update` (or *Update runnerdeck* in the settings) brings the clone it runs from up to date. It only fast-forwards `main`. It does nothing when the clone is on another branch, has changes of your own, or has commits of its own. The runners are other programs and keep running. Start runnerdeck again to use the new version.
+`runnerdeck --update` (or *Update runnerdeck* in the settings) brings the clone it was installed from up to date, and makes the installed command `runnerdeck` from it again (`--install` remembers which clone). It only fast-forwards `main`. It does nothing when the clone is on another branch, has changes of your own, or has commits of its own. The runners are other programs and keep running. Start runnerdeck again to use the new version.
 
 ## Why did a run fail?
 

@@ -7,6 +7,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import zipfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1579,7 +1580,7 @@ _git(_origin, "add", "."); _git(_origin, "commit", "-qm", "one")
 _git(_origin, "config", "receive.denyCurrentBranch", "ignore")
 subprocess.run(["git", "clone", "-q", _origin, _clone], check=True)
 subprocess.run(["git", "clone", "-q", _origin, _other], check=True)
-updatemod.ROOT = _clone
+updatemod.ROOT, updatemod.PYZ = _clone, os.path.join(_base, "installed.pyz")
 assert updatemod.update() == (True, "Already the newest (%s)." % _git(_clone, "rev-parse", "--short", "HEAD"))
 open(os.path.join(_other, "a"), "w").write("2")
 _git(_other, "commit", "-qam", "two"); _git(_other, "push", "-q", "origin", "main")
@@ -1594,8 +1595,27 @@ assert not updatemod.update()[0] and "not on main" in updatemod.update()[1]
 _git(_clone, "checkout", "-q", "main"); open(os.path.join(_clone, "b"), "w").write("x"); _git(_clone, "add", "b"); _git(_clone, "commit", "-qm", "mine")
 _ok, _said = updatemod.update()
 assert not _ok and "apart" in _said and open(os.path.join(_clone, "b")).read() == "x"
-updatemod.ROOT = _base
-assert not updatemod.update()[0] and "not a clone" in updatemod.update()[1]
+# the installed copy: it rebuilds itself from the clone that it was installed from, and knows that clone
+open(updatemod.PYZ, "w").write("old")
+assert not zipfile.is_zipfile(updatemod.PYZ)
+_git(_clone, "reset", "-q", "--hard", "HEAD~1")
+_real_rebuild, _made = updatemod.rebuild, []
+updatemod.rebuild = lambda clone: _made.append(clone) or True
+_ok, _said = updatemod.update()
+updatemod.rebuild = _real_rebuild
+assert _ok and "runnerdeck is up to date too" in _said and _made == [_clone], _said
+# made for real, from the code that is here, beside the copy and put in its place
+assert updatemod.rebuild(os.path.dirname(os.path.dirname(os.path.abspath(machines.__file__)))) and zipfile.is_zipfile(updatemod.PYZ)
+updatemod.ROOT = _base                                                       # run from the copy: it is not in a clone
+os.environ["RUNNERDECK_CONFIG"] = os.path.join(_base, "cfg", "config.ini")
+assert not updatemod.update()[0] and "no clone" in updatemod.update()[1]
+os.makedirs(os.path.join(_base, "cfg"))
+open(updatemod.source_file(), "w").write(_clone + "\n")
+assert updatemod.update()[0] and updatemod.clone_dir() == _clone
+updatemod.ROOT = _clone
+updatemod.remember()
+assert open(updatemod.source_file()).read().strip() == _clone
+os.environ.pop("RUNNERDECK_CONFIG", None)
 __import__("shutil").rmtree(_base, ignore_errors=True)
 
 # the log of a failed run: the words, without job, step and time

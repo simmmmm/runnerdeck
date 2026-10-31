@@ -13,7 +13,7 @@ from .system import WINDOWS
 from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, runner_rows, set_computer, set_section
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
 from .github import Queue, act_on_run, approve, close, failed_log, row_of
-from .update import update
+from .update import remember, update
 from .machines import Pc, RemoteMac, build_machines, probe
 from .terminal import ConsoleTerminal, CursesTerminal, ENTER, Grid, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
 from .boxes import paint, with_remote
@@ -305,6 +305,8 @@ def install():
             shutil.copyfile(here, target)
     else:
         build(target)
+        # So that the installed copy can update itself from this clone later (`runnerdeck --update`).
+        remember()
     if WINDOWS:
         command = os.path.expanduser("~/runnerdeck.cmd")
         with open(command, "w") as file:
