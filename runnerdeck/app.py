@@ -1,6 +1,7 @@
 """The screen's loop, and what runs from the command line."""
 import locale
 import os
+import shlex
 import shutil
 import sys
 import tempfile
@@ -261,9 +262,10 @@ def build(target):
 
 
 def install():
-    """This as ~/runnerdeck.pyz (built, if it is run from source), and `runnerdeck` in
-    the shell's rc to open it. Not in a login file: opening it at every login
-    would start the runners with it."""
+    """This as ~/runnerdeck.pyz (built, if it is run from source), and a command `runnerdeck` that opens
+    it: a small script in ~/.local/bin, which a line in the shell's file puts on the PATH. A script and
+    not an alias: an alias is only there if the whole of .zshrc runs to its end, and not over ssh without
+    a terminal. Nothing is started at a login."""
     target = os.path.expanduser("~/runnerdeck.pyz")
     here = os.path.abspath(sys.argv[0])
     if zipfile.is_zipfile(here):
@@ -276,16 +278,22 @@ def install():
         with open(command, "w") as file:
             file.write(f'@"{sys.executable}" "%~dp0runnerdeck.pyz" %*\r\n')
         return f"{target} and {command} are made.\nPut {os.path.dirname(command)} on your PATH. Then type: runnerdeck"
-    rc = os.path.expanduser("~/.zshrc" if os.path.basename(os.environ.get("SHELL", "")) == "zsh" else "~/.bashrc")
-    line = f"alias runnerdeck='{sys.executable} ~/runnerdeck.pyz'"
-    if "alias runnerdeck=" in read(rc):
-        said = f"The alias is in {rc} already."
+    launcher = os.path.expanduser("~/.local/bin/runnerdeck")
+    os.makedirs(os.path.dirname(launcher), exist_ok=True)
+    with open(launcher, "w") as file:
+        file.write(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$HOME/runnerdeck.pyz" "$@"\n')
+    os.chmod(launcher, 0o755)
+    # zsh reads .zshenv every time it starts, with a terminal or without; bash, .bashrc.
+    shell_file = os.path.expanduser("~/.zshenv" if os.path.basename(os.environ.get("SHELL", "")) == "zsh" else "~/.bashrc")
+    line = 'export PATH="$HOME/.local/bin:$PATH"'
+    if ".local/bin" in read(shell_file):
+        said = f"{shell_file} has ~/.local/bin on the PATH already."
     else:
-        with open(rc, "a") as file:
-            file.write(f"\n# runnerdeck: starts the runners and shows them\n{line}\n")
-        said = f"Added to {rc}: {line}"
-    return (f"Open a new terminal window. Then type: runnerdeck\n(Or run: source {rc})\n{said}\n"
-            f"The program is in {target}.")
+        with open(shell_file, "a") as file:
+            file.write(f"\n# runnerdeck: its command is in ~/.local/bin\n{line}\n")
+        said = f"Added to {shell_file}: {line}"
+    return (f"Open a new terminal window. Then type: runnerdeck\n(Or now: {launcher})\n{said}\n"
+            f"The command is {launcher}; the program is in {target}.")
 
 
 def init():

@@ -787,7 +787,7 @@ if not system.WINDOWS:
         assert os.WEXITSTATUS(status) == 0, status
         assert active(open(os.path.join(tmp, "c", "config.ini")).read()) == "[deck]\nrepos = owner/name\n"
         assert os.path.getsize(os.path.join(tmp, "runnerdeck.pyz")) > 1000
-        assert "alias runnerdeck=" in open(os.path.join(tmp, ".bashrc")).read()
+        assert ".local/bin" in open(os.path.join(tmp, ".bashrc")).read() and os.access(os.path.join(tmp, ".local", "bin", "runnerdeck"), os.X_OK)
         # And the program started again finds its config and does not ask.
         out = subprocess.run([sys.executable, "-m", "runnerdeck", "--status"], env=env, cwd=tmp, capture_output=True, text=True, timeout=60)
         assert out.returncode == 0 and "Welcome" not in out.stdout and "◐ runnerdeck" in out.stdout, out.stderr
@@ -800,12 +800,17 @@ if not system.WINDOWS:
         try:
             os.environ["HOME"], os.environ["SHELL"] = home, "/bin/zsh"
             first = app.install()
-            rc = os.path.join(home, ".zshrc")
-            assert os.path.exists(os.path.join(home, "runnerdeck.pyz")) and ".zshrc" in first
-            assert "Added to " + rc in first and "alias runnerdeck=" in first, first
-            assert open(rc).read().count("alias runnerdeck=") == 1
+            shell_file = os.path.join(home, ".zshenv")
+            launcher = os.path.join(home, ".local", "bin", "runnerdeck")
+            assert os.path.exists(os.path.join(home, "runnerdeck.pyz")) and ".zshenv" in first
+            assert "Added to " + shell_file in first and ".local/bin" in first, first
+            assert open(shell_file).read().count('export PATH="$HOME/.local/bin') == 1
+            assert os.access(launcher, os.X_OK)
+            # the command itself works, with no shell file read at all: it is a script, not an alias
+            ran = subprocess.run([launcher, "--help"], env=dict(os.environ, HOME=home), capture_output=True, text=True, timeout=60)
+            assert ran.returncode == 0 and "runnerdeck" in ran.stdout, (ran.returncode, ran.stderr)
             second = app.install()
-            assert "already" in second and "Added to" not in second and open(rc).read().count("alias runnerdeck=") == 1
+            assert "already" in second and "Added to" not in second and open(shell_file).read().count('export PATH="$HOME/.local/bin') == 1
         finally:
             for key, value in saved.items():
                 if value is None:
