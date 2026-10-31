@@ -1290,7 +1290,9 @@ with tempfile.TemporaryDirectory() as tmp:
     assert [r["name"] for r in good["runners"]] == ["mac[2J"] and good["runners"][0]["log"] == ["a[31m line"]       # nothing that moves the cursor
     assert [(b["name"], b["status"]) for b in good["builds"]] == [("tests", "running")]
     assert machines.parse_mac("") is None and machines.parse_mac("{not json") is None and machines.parse_mac("[1]") is None
-    odd = machines.parse_mac(json.dumps({"cpu": "high", "memory": "much", "thermal": "Lava", "power": 3, "runners": "x", "builds": 4}))
+    # another line of JSON (a shell that prints one) is not the program's answer
+    assert machines.parse_mac('{"hello": 1}') is None and machines.parse_mac('{"now": 1, "runners": "x"}') is None
+    odd = machines.parse_mac(json.dumps({"now": 1, "cpu": "high", "memory": "much", "thermal": "Lava", "power": 3, "runners": [], "builds": 4}))
     assert odd["cpu"] is None and odd["memory"] is None and odd["thermal"] is None and odd["power"] is None
     assert odd["runners"] == [] and odd["builds"] == []
 
@@ -1452,6 +1454,24 @@ with tempfile.TemporaryDirectory() as tmp:
                              env=env, cwd=tmp, capture_output=True, text=True, timeout=60)
     lines = started.stdout.split()
     assert started.returncode == 0 and lines[0] != "None" and lines[1] == "None", (started.stdout, started.stderr)
+
+# the GPU: a processor with graphics has two cards; the one with the most memory is shown, whatever its number
+_sys = tempfile.mkdtemp()
+for card, busy, used, total, temp in (("card0", 3, 0, 0, 40000), ("card1", 61, 2 * 2**30, 16 * 2**30, 55000)):
+    d = os.path.join(_sys, "class/drm", card, "device")
+    os.makedirs(os.path.join(d, "hwmon/hwmon9"))
+    for name, value in (("gpu_busy_percent", busy), ("mem_info_vram_used", used), ("mem_info_vram_total", total)):
+        open(os.path.join(d, name), "w").write(f"{value}\n")
+    open(os.path.join(d, "hwmon/hwmon9/temp1_input"), "w").write(f"{temp}\n")
+seen = parse = machines.parse_pc(subprocess.run(["sh", "-s", ""], input=machines.PC_ASKS, capture_output=True, text=True,
+                                                env={**os.environ, "RUNNERDECK_SYS": _sys}).stdout)
+assert seen["gpu"] == 61.0 and seen["vram"] == (2.0, 16.0) and seen["gpu_temp"] == 55.0, seen
+_shutil_ = __import__("shutil"); _shutil_.rmtree(_sys, ignore_errors=True)
+
+# a computer that does not answer says why, in words, and a Mac's answer must be the program's own
+for said, word in (("ssh: connect to host 10.0.0.9 port 22: Connection refused", "SSH server"), ("", "did not connect")):
+    assert word in machines.explain_ssh(said, "me@mac"), said
+assert machines.probe("-oProxyCommand=x") == 2 and machines.probe("") == 2
 
 import shutil as _shutil
 _shutil.rmtree(os.environ["RUNNERDECK_DATA"], ignore_errors=True)

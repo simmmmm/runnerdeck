@@ -11,6 +11,7 @@ import textwrap
 import threading
 import time
 from .config import ConfigError, FOLDER, HOST, REFERENCE, SLUG, WORD, configure, default_path, set_approval, set_host, set_section
+from .machines import explain_ssh
 from .runners import Runner, TOKEN, find_runners, gh_token, plan_of, set_up
 from .terminal import K_BACKSPACE, K_DOWN, K_RESIZE, K_UP, Screen, colours, frame
 
@@ -94,23 +95,6 @@ class Checks:
         except (OSError, subprocess.SubprocessError):
             return False, explain_ssh("timed out", host)
         return (True, "") if got.returncode == 0 else (False, explain_ssh(got.stderr, host))
-
-
-def explain_ssh(stderr, host):
-    """What ssh said, as a thing a person can do something about."""
-    said = (stderr or "").lower()
-    if "host key verification failed" in said or "no matching host key" in said:
-        return f"This computer does not know the PC yet. Run this once, answer yes, and try again: ssh {host}"
-    if "connection refused" in said:
-        return "The PC refuses the connection. Its SSH server is probably off. On Linux: sudo systemctl enable --now sshd"
-    if "permission denied" in said:
-        return f"The PC answers, but does not accept your key. Add it once: ssh-copy-id {host}"
-    if "could not resolve" in said or "name or service not known" in said:
-        return "That name is not known. Try the IP address."
-    if "timed out" in said or "no route to host" in said or "unreachable" in said:
-        return "No answer. Check the address, and that the PC is on and on the same network."
-    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
-    return lines[-1] if lines else "It did not connect."
 
 
 def make_runner(cfg, n, token):

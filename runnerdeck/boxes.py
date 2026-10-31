@@ -381,9 +381,12 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
                 y = runners_box(canvas, y, width, pc.runner_list(), queue, f"runners · {pc.name}")
         else:
             y = pc_box(canvas, y, width, pc)
-    down = [pc.name for pc in pcs if getattr(pc, "failed", False) and not pc.reachable()]
+    down = [pc for pc in pcs if getattr(pc, "failed", False) and not pc.reachable()]
     if down:
-        canvas.put(0, 15, "· " + ", ".join(down) + " not answering", "dim")
+        words = "· " + ", ".join(pc.name for pc in down) + " not answering"
+        if len(down) == 1 and getattr(down[0], "why", ""):
+            words += f": {down[0].why}"
+        canvas.put(0, 15, words[:max(0, width - 15 - 30)], "dim")
     if runners:
         y = runners_box(canvas, y, width, runners, queue)
     here = recent_builds()

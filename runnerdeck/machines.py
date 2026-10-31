@@ -7,6 +7,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -144,8 +145,16 @@ echo "stat $(head -n1 /proc/stat)"
 echo "load $(cut -d' ' -f1 /proc/loadavg)"
 echo "threads $(nproc)"
 sed -n 's/^\(MemTotal\|MemAvailable\): *\([0-9]*\).*/mem_\1 \2/p' /proc/meminfo
-for d in /sys/class/drm/card[0-9]/device; do
+SYS="${RUNNERDECK_SYS:-/sys}"
+# A processor with graphics has two cards: the one with the most memory is the card that is a card.
+best=""; bestv=-1
+for d in "$SYS"/class/drm/card[0-9]/device; do
     [ -r "$d/gpu_busy_percent" ] || continue
+    v=$(cat "$d/mem_info_vram_total" 2>/dev/null); v=${v:-0}
+    if [ "$v" -gt "$bestv" ] 2>/dev/null; then best="$d"; bestv="$v"; fi
+done
+if [ -n "$best" ]; then
+    d="$best"
     echo "gpu $(cat "$d/gpu_busy_percent")"
     echo "vram_used $(cat "$d/mem_info_vram_used" 2>/dev/null)"
     echo "vram_total $(cat "$d/mem_info_vram_total" 2>/dev/null)"
@@ -153,12 +162,11 @@ for d in /sys/class/drm/card[0-9]/device; do
         echo "gpu_temp $(cat "$h/temp1_input" 2>/dev/null)"
         echo "gpu_power $(cat "$h/power1_average" "$h/power1_input" 2>/dev/null | head -n1)"
     done
-    break
-done
+fi
 if command -v nvidia-smi >/dev/null 2>&1; then
     echo "nvidia $(nvidia-smi --query-gpu=utilization.gpu,temperature.gpu,power.draw,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1)"
 fi
-for h in /sys/class/hwmon/hwmon*; do
+for h in "$SYS"/class/hwmon/hwmon*; do
     [ "$(cat "$h/name" 2>/dev/null)" = k10temp ] && echo "cpu_temp $(cat "$h/temp1_input" 2>/dev/null)"
 done
 echo "now $(date +%s)"
@@ -291,6 +299,25 @@ def ssh_command(host, *remote):
     return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", *keep, "--", host, *remote]
 
 
+def explain_ssh(stderr, host):
+    """What ssh said, as a thing a person can do something about."""
+    said = (stderr or "").lower()
+    if "host key verification failed" in said or "no matching host key" in said:
+        return f"This computer does not know the other one yet. Run this once, answer yes, and try again: ssh {host}"
+    if "connection refused" in said:
+        return "It refuses the connection. Its SSH server is probably off. On Linux: sudo systemctl enable --now sshd"
+    if "permission denied" in said:
+        return f"It answers, but does not accept your key. Add it once: ssh-copy-id {host}"
+    if "could not resolve" in said or "name or service not known" in said:
+        return "That name is not known. Try the IP address."
+    if "timed out" in said or "no route to host" in said or "unreachable" in said:
+        return "No answer. Check the address, and that it is on and on the same network."
+    if "command not found" in said or "no such file" in said:
+        return "It answers, but ssh finds no python3 or sh on it."
+    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
+    return lines[-1] if lines else "It did not connect."
+
+
 def ask_pc(host, service=""):
     """One round trip: the machine's answer, parsed, or None when it did not
     give one. Without a host it is this machine, asked with the same script."""
@@ -304,6 +331,8 @@ def ask_pc(host, service=""):
     if host is not None:
         command = ssh_command(host, *command)
     got = subprocess.run(command, input=PC_ASKS, capture_output=True, text=True, timeout=20)
+    if got.returncode != 0 and host is not None:
+        raise OSError(explain_ssh(got.stderr, host))
     return parse_pc(got.stdout) if got.returncode == 0 and got.stdout.strip() else None
 
 
@@ -315,22 +344,26 @@ class Pc:
         self.name, self.host, self.service = name, host, service
         self.now, self.at = {}, None
         # True once it has been asked and did not answer: the screen leaves its box out and says so in the head.
-        self.failed = False
+        self.failed, self.why = False, ""
         self.cpu, self.gpu = deque(maxlen=200), deque(maxlen=200)
         if once:
             self.sample()
         else:
             threading.Thread(target=self.loop, daemon=True).start()
 
+    def ask(self):
+        return ask_pc(self.host, self.service)
+
     def sample(self):
+        why = "no answer"
         try:
-            now = ask_pc(self.host, self.service)
-        except (OSError, subprocess.SubprocessError):
-            now = None
+            now = self.ask()
+        except (OSError, subprocess.SubprocessError) as err:
+            now, why = None, clean(str(err))[:100] or why
         if now is None:
             # Kept as it was, but called stale: a machine that is off must
             # not look busy.
-            self.at, self.failed = None, True
+            self.at, self.failed, self.why = None, True, why
             return
         for history, value in ((self.cpu, now["cpu"]), (self.gpu, now["gpu"])):
             if value is not None:
@@ -425,11 +458,13 @@ def parse_mac(said):
     for line in said.splitlines():
         if line.startswith("{"):
             try:
-                raw = json.loads(line)
+                found = json.loads(line)
             except ValueError:
                 continue
-            break
-    if not isinstance(raw, dict):
+            # The program's own line has these two; another JSON line is not it.
+            if isinstance(found, dict) and "now" in found and isinstance(found.get("runners"), list):
+                raw = found
+    if raw is None:
         return None
 
     def number(value):
@@ -467,7 +502,13 @@ def ask_mac(host, runners):
         return None
     got = subprocess.run(ssh_command(host, "python3", "-"), input=mac_program(runners), capture_output=True, text=True,
                          timeout=60)
-    return parse_mac(got.stdout) if got.returncode == 0 else None
+    if got.returncode != 0:
+        raise OSError(explain_ssh(got.stderr, host))
+    answer = parse_mac(got.stdout)
+    if answer is None:
+        first = clean(next((line for line in got.stdout.splitlines() if line.strip()), ""))[:60]
+        raise OSError("What came back is not the program's answer" + (f": {first}" if first else " (nothing)"))
+    return answer
 
 
 class RemoteRunner:
@@ -518,3 +559,32 @@ def build_machines(cfg, once=False):
     others = [RemoteMac(host["name"], host["ssh"], host["runners"], once) if host["kind"] == "macos"
               else Pc(host["name"], host["ssh"], host["service"], once) for host in cfg.hosts]
     return here, pcs + others
+
+
+def probe(host, kind="linux"):
+    """What a computer sends back when asked, raw: to see what is wrong when its box is empty.
+    Prints, and returns the exit code."""
+    if not HOST.match(host or ""):
+        print("usage: runnerdeck --probe user@host [linux|macos]", file=sys.stderr)
+        return 2
+    if kind == "macos":
+        command, program = ssh_command(host, "python3", "-"), mac_program([("mac", "~/actions-runner")])
+    else:
+        command, program = ssh_command(host, "sh", "-s", ""), PC_ASKS
+    try:
+        got = subprocess.run(command, input=program, capture_output=True, text=True, timeout=90)
+    except (OSError, subprocess.SubprocessError) as err:
+        print(f"could not run ssh: {err}")
+        return 1
+    print(f"exit code: {got.returncode}")
+    print("--- stderr (first 1000 characters, line ends as |):")
+    print(clean(got.stderr.replace("\n", " | "))[:1000] or "(nothing)")
+    print("--- stdout (first 2500 characters, line ends as |):")
+    print(clean(got.stdout.replace("\n", " | "))[:2500] or "(nothing)")
+    try:
+        parsed = parse_mac(got.stdout) if kind == "macos" else parse_pc(got.stdout)
+    except Exception as err:
+        parsed = None
+        print(f"(it could not be read: {err})")
+    print("--- result:", "a usable answer" if parsed else "no usable answer")
+    return 0

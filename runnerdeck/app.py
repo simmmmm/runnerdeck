@@ -12,7 +12,7 @@ from .system import WINDOWS
 from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, runner_rows, set_section
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
 from .github import Queue, act_on_run, approve, close, row_of
-from .machines import Pc, RemoteMac, build_machines
+from .machines import Pc, RemoteMac, build_machines, probe
 from .terminal import ConsoleTerminal, CursesTerminal, ENTER, Grid, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
 from .boxes import paint
 from .builds import run_recorded
@@ -372,6 +372,9 @@ def main(args=None):
     if args[:1] == ["run"]:
         # A command that is run and recorded; no config is needed, and its own exit code is ours.
         sys.exit(run_recorded(args[1:]))
+    if "--probe" in args:
+        at = args.index("--probe") + 1
+        sys.exit(probe(args[at] if at < len(args) else "", args[at + 1] if at + 1 < len(args) else "linux"))
     if "--help" in args or "-h" in args:
         print(sys.modules[__package__].__doc__)
         return
