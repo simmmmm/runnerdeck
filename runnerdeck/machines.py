@@ -173,6 +173,33 @@ echo "now $(date +%s)"
 ls -t "${RUNNERDECK_DATA:-$HOME/.local/share/runnerdeck}"/builds/*.json 2>/dev/null | head -n 8 | while IFS= read -r f; do
     echo "build $(stat -c %Y "$f" 2>/dev/null) $(tr -d '\n' < "$f")"
 done
+# The Rust of the runner's service: what its newest checkout asks for, else rustup's default, as rustup
+# names it; read from files, and the toolchain's own rustc run (rustup itself would download one).
+if [ -n "$1" ]; then
+    RH="${RUSTUP_HOME:-$HOME/.rustup}"
+    wd=$(systemctl --user show -p WorkingDirectory --value "$1" 2>/dev/null)
+    want=""
+    if [ -n "$wd" ]; then
+        f=$(ls -t "$wd"/_work/*/*/rust-toolchain.toml "$wd"/_work/*/*/rust-toolchain 2>/dev/null | head -n1)
+        if [ -n "$f" ]; then
+            want=$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -n1)
+            [ -n "$want" ] || { grep -q '[=\[]' "$f" || want=$(head -n1 "$f" | tr -d ' \r'); }
+        fi
+    fi
+    [ -n "$want" ] || want=$(sed -n 's/^default_toolchain *= *"\(.*\)"/\1/p' "$RH/settings.toml" 2>/dev/null)
+    case "$want" in *[!A-Za-z0-9._-]*) want="";; esac
+    if [ -n "$want" ] && [ -d "$RH/toolchains" ]; then
+        tc=$(ls "$RH/toolchains" | grep -E "^$want(-|$)" | head -n1)
+        if [ -z "$tc" ]; then
+            echo "rust $want (not installed)"
+        else
+            label=$(echo "$tc" | sed 's/-\(x86_64\|aarch64\|i686\|armv7\|riscv64gc\|powerpc64le\|s390x\)[A-Za-z0-9_.-]*$//')
+            ver=$("$RH/toolchains/$tc/bin/rustc" --version 2>/dev/null | awk '{print $1" "$2}')
+            case "$ver" in *" $label") label="";; esac
+            echo "rust $ver $label"
+        fi
+    fi
+fi
 echo "runner $([ -n "$1" ] && systemctl --user is-active "$1" 2>/dev/null)"
 echo log
 [ -n "$1" ] && journalctl --user -u "$1" -n 200 --no-pager -o cat 2>/dev/null
@@ -222,7 +249,8 @@ def parse_pc(said):
 
     now = {"threads": number("threads"), "load": number("load"), "gpu": number("gpu"),
            "cpu_temp": number("cpu_temp", 1000), "gpu_temp": number("gpu_temp", 1000),
-           "gpu_power": number("gpu_power", 1e6), "runner": clean(got.get("runner", "")) or None}
+           "gpu_power": number("gpu_power", 1e6), "runner": clean(got.get("runner", "")) or None,
+           "rust": clean(got.get("rust", ""))[:40]}
     try:
         # user nice system idle iowait ...: busy is everything but idle and iowait.
         first, second = ([int(field) for field in stat] for stat in stats[:2])
@@ -523,6 +551,9 @@ class ServiceRunner:
 
     def state(self):
         return self.pc.state()
+
+    def toolchain(self):
+        return self.pc.now.get("rust", "") if self.pc.reachable() else ""
 
 
 class RemoteRunner:

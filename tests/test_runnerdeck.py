@@ -1468,6 +1468,28 @@ seen = parse = machines.parse_pc(subprocess.run(["sh", "-s", ""], input=machines
 assert seen["gpu"] == 61.0 and seen["vram"] == (2.0, 16.0) and seen["gpu_temp"] == 55.0, seen
 _shutil_ = __import__("shutil"); _shutil_.rmtree(_sys, ignore_errors=True)
 
+# the Rust of a service runner: the newest checkout's file, else rustup's default; the toolchain's own rustc is run
+_home = tempfile.mkdtemp()
+for name, version in (("stable-x86_64-unknown-linux-gnu", "1.90.0"), ("1.82.0-x86_64-unknown-linux-gnu", "1.82.0")):
+    os.makedirs(os.path.join(_home, ".rustup/toolchains", name, "bin"))
+    with open(os.path.join(_home, ".rustup/toolchains", name, "bin/rustc"), "w") as f:
+        f.write(f"#!/bin/sh\necho 'rustc {version} (abc 2026-01-01)'\n")
+    os.chmod(os.path.join(_home, ".rustup/toolchains", name, "bin/rustc"), 0o755)
+open(os.path.join(_home, ".rustup/settings.toml"), "w").write('default_toolchain = "stable-x86_64-unknown-linux-gnu"\n')
+os.makedirs(os.path.join(_home, "bin"))
+open(os.path.join(_home, "bin/systemctl"), "w").write(f"#!/bin/sh\ncase \"$*\" in *WorkingDirectory*) echo {_home}/run;; *is-active*) echo active;; esac\n")
+os.chmod(os.path.join(_home, "bin/systemctl"), 0o755)
+def rust_said():
+    return machines.parse_pc(subprocess.run(["sh", "-s", "x.service"], input=machines.PC_ASKS, capture_output=True, text=True,
+                                            env={**os.environ, "RUSTUP_HOME": _home + "/.rustup", "HOME": _home, "PATH": _home + "/bin:" + os.environ["PATH"]}).stdout)["rust"]
+assert rust_said() == "rustc 1.90.0 stable", rust_said()
+os.makedirs(os.path.join(_home, "run/_work/Numa-dev/Numa-dev"))
+open(os.path.join(_home, "run/_work/Numa-dev/Numa-dev/rust-toolchain.toml"), "w").write('[toolchain]\nchannel = "1.82.0"\n')
+assert rust_said() == "rustc 1.82.0", rust_said()
+open(os.path.join(_home, "run/_work/Numa-dev/Numa-dev/rust-toolchain.toml"), "w").write('[toolchain]\nchannel = "1.70.0"\n')
+assert rust_said() == "1.70.0 (not installed)", rust_said()
+__import__("shutil").rmtree(_home, ignore_errors=True)
+
 # a computer that does not answer says why, in words, and a Mac's answer must be the program's own
 for said, word in (("ssh: connect to host 10.0.0.9 port 22: Connection refused", "SSH server"), ("", "did not connect")):
     assert word in machines.explain_ssh(said, "me@mac"), said

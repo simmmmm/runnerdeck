@@ -172,6 +172,9 @@ def runners_box(canvas, y, width, runners, queue, title="runners"):
             canvas.put(line, 11 + len(words), " · last ", "dim")
             canvas.put(line, 19 + len(words), last, "bad" if "fail" in last else "good" if "succeed" in last else "plain")
         when = ago(since)
+        tools = runner.toolchain() if hasattr(runner, "toolchain") else ""
+        if tools and not busy and wide:
+            right(canvas, line, width - len(when) - 4, tools, "dim")
         if busy:
             share, steps, left = progress(busy)
             at, place = (line, 34) if wide else (line + 1, 11)
