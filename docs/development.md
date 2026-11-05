@@ -27,6 +27,7 @@ python3 runnerdeck.pyz
 | `runnerdeck/system.py` | Differences between macOS, Linux, and Windows. |
 | `runnerdeck/runners.py` | The runners on this machine. |
 | `runnerdeck/github.py` | Runs and requests, through `gh`. |
+| `runnerdeck/health.py` | The health box: red, flaky, stale, disk, issues. |
 | `runnerdeck/machines.py` | CPU, GPU, memory, and temperature. |
 | `runnerdeck/terminal.py` | Keys and drawing. |
 | `runnerdeck/boxes.py` | The boxes of the screen. |

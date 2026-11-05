@@ -22,6 +22,7 @@
 - It shows each runner on your machine, what it does, and how far its job is.
 - It shows CPU, GPU, memory, and temperature of your machines. It reads a second computer over SSH, a Linux PC or a Mac.
 - It shows the last workflow runs of your repositories. You can cancel, repeat, or open a run.
+- It can tell you if your CI is well: what is red and for how long, what is flaky, the free disk, and the issues that ask for a look. See [Health](docs/health.md).
 - The first time, it asks a few questions on the screen and writes the config file for you. It finds runners that are set up already.
 - It shows builds that are not on GitHub too, when you start them with `runnerdeck run -- <command>`. For a Rust project it says which compiler was used. See [Builds](docs/builds.md).
 - You can add a new runner. You only paste the token.
@@ -75,13 +76,14 @@ service = actions-runner.service
 | `s` / `x` | Start / stop the runners. |
 | `←` `→` or `Tab` | Switch to the log of another runner. All runners are tabs above the log. |
 | `↑` `↓` | Choose a run. |
-| `c` `r` `o` | Cancel, repeat, or open the chosen run. |
+| `c` `r` `o` | Cancel, repeat, or open the chosen run. `o` opens a chosen issue of the health box too. |
 
 ## More
 
 - [Config: all options, with examples](docs/config.md)
 - [Builds that are not on GitHub](docs/builds.md)
 - [Approval: keep a workflow behind your yes](docs/approval.md)
+- [Health: red workflows, flaky runs, disk, stale Smoke](docs/health.md)
 - [Safety](docs/safety.md)
 - [Development: modules, tests, one-file build](docs/development.md)
 

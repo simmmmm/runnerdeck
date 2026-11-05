@@ -14,7 +14,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The records of builds that the screen reads are the test's own, never those of whoever runs it.
 os.environ["RUNNERDECK_DATA"] = tempfile.mkdtemp(prefix="runnerdeck-data-")
 sys.path.insert(0, ROOT)
-from runnerdeck import boxes, builds, config as configmod, github, machines, runners, system, terminal
+from runnerdeck import boxes, builds, config as configmod, github, health as healthmod, machines, runners, system, terminal
 
 
 def configured(text):
@@ -1651,6 +1651,104 @@ assert "Publish Linux" in _text and "on numa" in _text and "waiting for Linux" i
 for said, word in (("ssh: connect to host 10.0.0.9 port 22: Connection refused", "SSH server"), ("", "did not connect")):
     assert word in machines.explain_ssh(said, "me@mac"), said
 assert machines.probe("-oProxyCommand=x") == 2 and machines.probe("") == 2
+
+# --- health: what is red and for how long, flaky, stale, the disk, the issues; off without [health]
+assert configured("[deck]\nrepos = a/b\n").health is None
+_hc = configured("[deck]\nrepos = a/b, a/c\n[health]\n").health
+assert _hc == {"repos": ["a/b", "a/c"], "disk": [], "disk_min": 20, "smoke": [], "smoke_days": 8, "queued_min": 30, "label": "ci-red"}, _hc
+_hc = configured("[deck]\nrepos = a/b\n[health]\nrepos = x/y\ndisk = /mnt/data-games, ~/x\ndisk_min = 5\nsmoke = x/y:Smoke\nlabel = broken\n").health
+assert _hc["repos"] == ["x/y"] and _hc["disk"][0] == "/mnt/data-games" and _hc["smoke"] == [("x/y", "Smoke")] and _hc["disk_min"] == 5
+for _bad, _word in (("repos = a/b/c", "repos"), ("disk = /a;rm", "disk"), ("disk_min = lots", "disk_min"), ("queued_min = 0", "queued_min"),
+                    ("smoke = Smoke", "smoke"), ("smoke = a/b:-x", "smoke"), ("label = a;b", "label")):
+    refuses("[deck]\nrepos = a/b\n[health]\n" + _bad + "\n", _word)
+# the example at the foot of every file the program writes parses once its lines are uncommented
+_lines = configmod.REFERENCE.split("# [health]\n", 1)[1].split("\n#\n", 1)[0].splitlines()
+_open = "[deck]\nrepos = a/b\n[health]\n" + "\n".join(line[2:] for line in _lines if line.startswith("# ") and "=" in line and not line.startswith("# The")) + "\n"
+assert configured(_open).health["disk"] == ["/mnt/data-games"] and configured(_open).health["smoke"] == [("owner/name", "Smoke")], _open
+
+_now = int(time.time())
+def _at(seconds_ago):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_now - seconds_ago))
+def _hr(number, flow, sha, conclusion, ago, status="completed"):
+    return {"databaseId": number, "workflowName": flow, "headSha": sha, "status": status, "conclusion": conclusion, "createdAt": _at(ago)}
+H = 3600
+_runs = [_hr(9, "CI", "c3", None, 60, "in_progress"), _hr(8, "CI", "c2", "failure", 5 * H), _hr(7, "CI", "c1", "success", 9 * H),
+         _hr(6, "Build", "c2", "failure", 2 * H), _hr(5, "Build", "c1", "failure", 30 * H), _hr(4, "Build", "c0", "success", 50 * H),
+         _hr(3, "Screenshots", "c1", "success", 4 * H), _hr(2, "Screenshots", "c1", "failure", 6 * H),
+         _hr(1, "Publish", "c0", "cancelled", 3 * H)]
+_flows = {flow["name"]: flow for flow in healthmod.assess(_runs, _now)}
+assert (_flows["Build"]["last"], _flows["Build"]["red_for"], _flows["Build"]["flaky"]) == ("red", 30 * H, 0)       # red since its first failure
+assert _flows["CI"]["last"] == "red" and _flows["CI"]["busy"] and _flows["CI"]["red_for"] == 5 * H                  # running again, still red
+assert (_flows["Screenshots"]["last"], _flows["Screenshots"]["flaky"], _flows["Screenshots"]["red_for"]) == ("green", 1, None)
+assert _flows["Publish"]["last"] is None                                                                           # cancelled says nothing
+assert [f["name"] for f in healthmod.assess(_runs, _now)][:2] == ["CI", "Build"]                                   # red first, running before quiet
+assert healthmod.late([_hr(1, "Publish Linux", "a", None, 50 * 60, "queued"), _hr(2, "CI", "b", None, 5 * 60, "queued")], _now, 30) == [("Publish Linux", 50)]
+assert [healthmod.howlong(x) for x in (30, 300, 5 * H, 3 * 86400)] == ["1 min", "5 min", "5 h", "3 d"]
+_low = healthmod.disks([ROOT, "/no/such/folder-xyz"], 10**9)
+assert _low[0][2] and _low[1][1] is None and not _low[1][2], _low                                                    # a folder that cannot be read is not "low"
+
+def _fake_gh(smoke_at=_now - 10 * 86400, down=()):
+    def run(command, **kw):
+        text = " ".join(command)
+        if any(word in text for word in down):
+            return types.SimpleNamespace(returncode=1, stdout="", stderr="nope")
+        if "repo view" in text:
+            out = {"defaultBranchRef": {"name": "main"}}
+        elif "--status queued" in text:
+            out = [_hr(11, "Publish Linux", "z", None, 90 * 60, "queued")]
+        elif "--workflow" in text:
+            out = [{"createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(smoke_at))}]
+        elif "run list" in text:
+            out = _runs
+        else:
+            out = [{"number": 12, "title": "CI red: Build main c2", "url": "https://x/12"}]
+        return types.SimpleNamespace(returncode=0, stdout=json.dumps(out), stderr="")
+    return run
+_hcfg = configured("[deck]\nrepos = a/Numa, a/Numa-dev\n[health]\ndisk_min = 1\nsmoke = a/Numa:Smoke\nqueued_min = 60\n")
+_shutil_which, _hrun = healthmod.shutil.which, healthmod.subprocess.run
+healthmod.shutil.which, healthmod.subprocess.run = lambda name: "/usr/bin/gh", _fake_gh()
+try:
+    _h = healthmod.Health(_hcfg, once=True)
+    _h.fetch(_now)
+    assert _h.loaded and set(_h.repos) == {"a/Numa", "a/Numa-dev"} and _h.problem == ""
+    assert _h.counts(_now) == (4, 3, 0), _h.counts(_now)               # Build and CI red in two repos; Smoke 10 d old; a run queued 90 min in each repo
+    assert _h.words(_now) == ("4 red · 3 stale", "bad")
+    assert [(i["repo"], i["number"]) for i in _h.issues] == [("a/Numa", 12), ("a/Numa-dev", 12)] and _h.issues[0]["row"] != _h.issues[1]["row"]
+    assert all(i["row"] >= healthmod.ISSUE_ROW for i in _h.issues)
+    # the screen at 80 columns: the head word, the box, the issues; and the keys of a chosen issue
+    _g = terminal.Grid(24, 80)
+    boxes.paint(_g, _hcfg, [], nothing, None, 0, "", picked=_h.issues[0]["row"], health=_h)
+    _t = _g.text()
+    _rows = _t.splitlines()
+    assert "4 red · 3 stale" in _rows[0] and all(len(r) <= 80 for r in _rows), _t
+    assert any("Numa" in r and "… CI red 5 h" in r and "✗ Build 30 h" in r and "flaky 1" in r for r in _rows), _t
+    assert any("Disk" in r and "GiB" in r for r in _rows) and any("Smoke" in r and "green 10 d ago" in r and "stale" in r for r in _rows), _t
+    assert any("Queued" in r and "Publish Linux" in r and "90 min" in r for r in _rows), _t
+    assert any("ci-red" in r and "#12 CI red: Build main c2" in r for r in _rows) and "o open" in _rows[-1], _t
+    # no room: the box is left out, the word stays
+    _g = terminal.Grid(12, 80)
+    boxes.paint(_g, _hcfg, [], nothing, None, 0, "", health=_h)
+    assert "health" not in _g.text() and "4 red" in _g.text().splitlines()[0]
+    # all good, and a Smoke that is fresh
+    healthmod.subprocess.run = _fake_gh(smoke_at=_now - 86400)
+    _good = healthmod.Health(configured("[deck]\nrepos = a/Numa\n[health]\nsmoke = a/Numa:Smoke\nqueued_min = 600\n"), once=True)
+    _good.fetch(_now - 0)
+    _good.repos["a/Numa"]["flows"] = [f for f in _good.repos["a/Numa"]["flows"] if f["last"] != "red"]
+    assert _good.words(_now) == ("all good", "good") and _good.counts(_now) == (0, 0, 0)
+    # gh that does not answer: nothing is known, and it says so; one repository keeps what was known
+    healthmod.subprocess.run = _fake_gh(down=("--repo a/Numa-dev",))
+    _h.fetch(_now)
+    assert "a/Numa-dev" in _h.repos and _h.problem.startswith("a/Numa-dev"), _h.problem
+    healthmod.subprocess.run = _fake_gh(down=("run list",))
+    _empty = healthmod.Health(_hcfg, once=True)
+    _empty.fetch(_now)
+    assert not _empty.loaded or _empty.problem
+    # o on an issue opens it with gh
+    _seen = []
+    healthmod.subprocess.run = lambda command, **kw: _seen.append(command) or types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    assert healthmod.open_issue(_h.issues[0]) == ("#12 opened", True) and _seen == [["gh", "issue", "view", "12", "--repo", "a/Numa", "--web"]]
+finally:
+    healthmod.shutil.which, healthmod.subprocess.run = _shutil_which, _hrun
 
 import shutil as _shutil
 _shutil.rmtree(os.environ["RUNNERDECK_DATA"], ignore_errors=True)
