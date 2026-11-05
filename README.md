@@ -3,7 +3,7 @@
 **One screen in your terminal for your GitHub Actions runners, your machines, and your workflow runs.**
 
 ```
- ◐ runnerdeck ▓▒░                                           awake   update ready · u   16:38:27
+ ◐ runnerdeck ▓▒░                                           update ready · u   awake   16:38:27
 ╭─ desk ──────────────────────────────────────────────────────── here · load 4.8 · 16 threads ─╮
 │ CPU  ▅▄▄▄▄▅▄▄▄▄▃▄▃▄▅▅▅▅▅▅▆▆▇▇▆▅▅▅▆▇▆▅   62 %   Heat     CPU 71 °C   GPU 58 °C                │
 │ GPU  ▄▄▄▄▃▃▃▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁   37 %   VRAM     8.2 / 16 GB                          │
