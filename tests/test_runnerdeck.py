@@ -1883,6 +1883,12 @@ with tempfile.TemporaryDirectory() as tmp:
                          capture_output=True, text=True, timeout=60)
     assert "◐ runnerdeck" in got.stdout and intro.LOGO[0] not in got.stdout and "\x1b" not in got.stdout, got.stdout
 
+# the head line says what to do, in few words; the full sentence stays in --status
+from runnerdeck.boxes import head_why
+assert head_why("It answers, but does not accept a key. add yours once, with the password of me@pc: ssh-copy-id me@pc") == "key refused, run: ssh-copy-id me@pc"
+assert head_why("No answer. Check the address.") == "No answer"
+
 import shutil as _shutil
 _shutil.rmtree(os.environ["RUNNERDECK_DATA"], ignore_errors=True)
 print("ok")
+
