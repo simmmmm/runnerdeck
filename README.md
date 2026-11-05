@@ -3,16 +3,17 @@
 **One screen in your terminal for your GitHub Actions runners, your machines, and your workflow runs.**
 
 ```
- ◐ runnerdeck                                                                    awake
-╭─ desk ───────────────────────────────────────────────────── here · load 1.4 · 16 threads ─╮
-│ CPU  ▁▁▂▂▃▃▅▅▆▇██▇▆▅▃▂▂▁▁▁▂▃▅▇██▇▅▃▂▁    74 %   Heat     CPU 71 °C  GPU 58 °C        │
-│ GPU  ▁▁▁▁▁▁▂▂▃▃▃▃▃▂▂▁▁▁▁▁▁▁▁▂▃▃▃▃▂▂▁▁▁    37 %   Card     142 W  VRAM 4.0 / 16 GB      │
-│ RAM  ██████████████···········   17.2 / 32 GB                                          │
-╰────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ runners ─────────────────────────────────────────────────────────────── 1 of 2 busy ─╮
-│ ● box    Running build                                                         4 min   │
-│ ○ box-2  Listening · last build succeeded                                      12 min  │
-╰────────────────────────────────────────────────────────────────────────────────────────╯
+ ◐ runnerdeck ▓▒░                                           update ready · u   awake   16:38:27
+╭─ desk ──────────────────────────────────────────────────────── here · load 4.8 · 16 threads ─╮
+│ CPU  ▅▄▄▄▄▅▄▄▄▄▃▄▃▄▅▅▅▅▅▅▆▆▇▇▆▅▅▅▆▇▆▅   62 %   Heat     CPU 71 °C   GPU 58 °C                │
+│ GPU  ▄▄▄▄▃▃▃▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁   37 %   VRAM     8.2 / 16 GB                          │
+│ RAM  ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱  22.2 / 30 GB     Busy     cargo 48 %   WorldOfWarship 6 %      │
+╰─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴────╯
+╭─ runners ────────────────────────────────────────────────────────────────────── 1 of 2 busy ─╮
+│ ⠋ box    Running build                                                                 4 min │
+│          ▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱  step 3 of 5 · cargo build --release                   ~5 min left │
+│ ○ box-2  Listening · last build succeeded                                             12 min │
+╰─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴────╯
 ```
 
 *Example screen. The numbers are made up.*
@@ -48,10 +49,17 @@ To ask the questions again, use `--setup`. The config file is plain text. It lis
 
 ## The look
 
-The screen is neon green and cyan on a dark ground. Amber means warm. Red means wrong. The colour is never the only sign: the numbers, the marks, and the words are there too.
+The screen is neon green and cyan on a dark ground. Amber means warm. Red means wrong. The colour is never the only sign: the numbers, the marks (✓ ✗ …), and the words are there too.
 
+- Each box has its name on a ground of its own. A box that holds something wrong (a failed run, a runner whose last job failed) has red corners and a red name.
+- The keys at the foot are on a ground of their own, so you can find them quickly.
+- A busy runner, a run that goes on, and a build that runs have a spinner. A light runs over the meter of a busy job. The time in the head moves each second. Then you know that the screen is live.
+- The github box says how old the list is (`8 s ago`). After two minutes without an answer it says `stale`. Before the first answer, it says that it asks GitHub.
+- On a tall terminal (about 42 rows for one machine, 6 more for each other machine), the CPU and GPU graphs are two rows high, in braille dots.
 - When you start the program, a short opening shows the logo. It takes about one second. Press any key to skip it. To turn it off, use `--no-intro` or set `RUNNERDECK_NO_INTRO=1`. `--status` has no opening.
-- A terminal with 8 colours (the Linux console, for example) gets 8 colours. With `NO_COLOR` set, or in a terminal that says it has no colours, the screen uses bold, dim, and reverse only.
+- Nothing moves with `RUNNERDECK_CALM=1`: no opening, no spinners. The screen is then drawn one time each second. When something moves, it is drawn four times each second.
+- A terminal with 8 colours (the Linux console, for example) gets 8 colours. With `NO_COLOR` set, or in a terminal that says it has no colours, the screen uses bold, dim, and reverse only, and nothing moves.
+- The Linux console and the old Windows console (not Windows Terminal) get simpler marks: `■` and `·` in the meters, `|/-\` as the spinner, and no braille.
 - The screen needs 80 columns. The opening needs 44 columns and 11 rows. On a smaller terminal it does not show.
 
 ## Example

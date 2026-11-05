@@ -131,6 +131,7 @@ class Queue:
         self.said = ""
         # Why there are no runs, when there are none: shown instead of a silent gap.
         self.problem = ""
+        self.at = None
         if not shutil.which("gh") or not self.cfg.repos:
             self.problem = "gh is not installed: get it from https://cli.github.com"
             return
@@ -186,6 +187,8 @@ class Queue:
         self.problem = "" if told else why
         if not told:
             return
+        # When GitHub last answered: the screen says how old the list is.
+        self.at = time.time()
         runs.sort(key=lambda run: run.get("createdAt", ""), reverse=True)
         self.runs = runs[:6]
         # Cancelling lasts until GitHub says the run is over.
