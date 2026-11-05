@@ -411,6 +411,14 @@ def footer(canvas, y, width, note, picking=None):
         x += len(key) + len(words) + 4
 
 
+def head_why(why):
+    """The one thing to do, short enough for the head line; the full words stay in --status."""
+    fix = re.search(r"ssh-copy-id \S+", why)
+    if fix:
+        return "key refused, run: " + fix.group(0)
+    return why.split(". ")[0]
+
+
 def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog=None, pcs=(), health=None):
     """The whole screen: the head, this machine and the others, the runners,
     GitHub's last runs and a log, the log taking what is left and GitHub
@@ -465,7 +473,7 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
     if down:
         words = "· " + ", ".join(pc.name for pc in down) + " not answering"
         if len(down) == 1 and getattr(down[0], "why", ""):
-            words += f": {down[0].why}"
+            words += f": {head_why(down[0].why)}"
         canvas.put(0, at, words[:max(0, edge - at)], "dim")
     if runners:
         y = runners_box(canvas, y, width, runners, queue)
