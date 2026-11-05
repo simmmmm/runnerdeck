@@ -17,8 +17,8 @@ from .health import Health, open_issue
 from .github import Queue, act_on_run, approve, close, failed_log, row_of
 from .update import behind, remember, update
 from .machines import Pc, RemoteMac, build_machines, probe
-from .terminal import ConsoleTerminal, CursesTerminal, ENTER, Grid, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
-from .boxes import paint, with_remote
+from .terminal import MOTION, ConsoleTerminal, CursesTerminal, ENTER, Grid, depth, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
+from .boxes import moving, paint, with_remote
 from .builds import run_recorded
 from .intro import facts, play as opening
 from .setup import Wizard, menu, run as run_setup, show_text
@@ -200,7 +200,8 @@ def show(window, cfg, runners, queue, machine, pcs=(), health=None):
         screen = Screen(window)
         paint(screen, cfg, runners, queue, machine, shown, note, picked, dialog, pcs, health)
         screen.flush()
-        key = window.key()
+        # Four times a second while something moves (a spinner, a busy job), else once: the PC has other work.
+        key = window.key(0.25 if MOTION[0] and moving(runners, queue, pcs) else 1.0)
         if key == -1:
             continue
         if key == K_RESIZE:
@@ -401,7 +402,9 @@ def terminal(work):
 def screen(cfg, runners, queue, here, pcs, intro=True, health=None):
     def work(console):
         colours()
-        if intro:
+        # Nothing moves with RUNNERDECK_CALM, or where there is no colour.
+        MOTION[0] = not os.environ.get("RUNNERDECK_CALM") and depth() > 0
+        if intro and MOTION[0]:
             opening(console, facts(cfg, runners, pcs))
         show(console, cfg, runners, queue, here, pcs, health)
     terminal(work)

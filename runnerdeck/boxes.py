@@ -1,5 +1,6 @@
 """The boxes of the screen, and the screen made of them."""
 import os
+import re
 import time
 from .util import STAMP, ago, moment
 from .builds import recent as recent_builds
@@ -7,7 +8,7 @@ from .system import alive
 from .github import row_of
 from .health import ISSUE_ROW, health_box, height_of
 from .machines import power, run, watts
-from .terminal import frame, heat, meter, popup, right, spark
+from .terminal import frame, graph, heat, meter, popup, right, spin
 
 
 MARKS = {"running": "●", "listening": "○", "starting": "◌"}
@@ -20,32 +21,40 @@ WORDS = {"listening": "Listening", "starting": "Starting…", "stopped": "Stoppe
 RESULTS = {"success": "✓", "failure": "✗", "cancelled": "–", "skipped": "–"}
 
 
-def mac_box(canvas, y, width, machine):
-    """CPU and GPU as graphs, memory as a meter; beside them, or under them
-    where the screen is narrow, what the battery says and how hot."""
-    now = machine.now
-    wide = width >= 96
-    height = 5 if wide else 8
-    # This Mac has the name "mac" and its own load; a Mac over ssh brings its name and what it says of itself.
-    title = getattr(machine, "title", "mac")
-    summary = machine.summary() if hasattr(machine, "summary") else f"load {os.getloadavg()[0]:.1f} · {os.cpu_count()} cores"
-    frame(canvas, y, 0, height, width, title, summary)
-    half = (width - 4) // 2 - 1 if wide else width - 4
-    row = y + 1
-    for name, value, history in (("CPU", now.get("cpu"), machine.cpu), ("GPU", now.get("gpu"), machine.gpu)):
+def gauges(canvas, y, half, now, cpu, gpu, tall=1):
+    """CPU and GPU as graphs `tall` rows high, memory as a meter, at the left of a machine's
+    box; the row under them."""
+    row = y
+    for name, value, history in (("CPU", now.get("cpu"), cpu), ("GPU", now.get("gpu"), gpu)):
         canvas.put(row, 2, name, "label")
-        spark(canvas, row, 7, half - 13, history)
+        graph(canvas, row, 7, half - 13, tall, history)
         if value is None:
             canvas.put(row, half - 4, "  —", "dim")
         else:
             canvas.put(row, half - 4, f"{value:3.0f} %", heat(value / 100))
-        row += 1
+        row += tall
     used = now.get("memory")
     canvas.put(row, 2, "RAM", "label")
     if used:
         meter(canvas, row, 7, half - 22, used[0] / used[1])
         canvas.put(row, half - 13, f"{used[0]:4.1f} / {used[1]:.0f} GB", "plain")
-    row = y + 1 if wide else row + 1
+    return row + 1
+
+
+def mac_box(canvas, y, width, machine, tall=1):
+    """CPU and GPU as graphs, memory as a meter; beside them, or under them
+    where the screen is narrow, what the battery says and how hot. `tall`: the
+    rows of each graph, more where the screen has room."""
+    now = machine.now
+    wide = width >= 96
+    height = (5 if wide else 8) + 2 * (tall - 1)
+    # This Mac has the name "mac" and its own load; a Mac over ssh brings its name and what it says of itself.
+    title = getattr(machine, "title", "mac")
+    summary = machine.summary() if hasattr(machine, "summary") else f"load {os.getloadavg()[0]:.1f} · {os.cpu_count()} cores"
+    frame(canvas, y, 0, height, width, title, summary)
+    half = (width - 4) // 2 - 1 if wide else width - 4
+    row = gauges(canvas, y + 1, half, now, machine.cpu, machine.gpu, tall)
+    row = y + 1 if wide else row
     x = half + 4 if wide else 2
     battery = now.get("power") or {}
     canvas.put(row, x, "Power", "label")
@@ -78,14 +87,14 @@ def hot(degrees, warm, bad):
     return "dim" if degrees is None else "bad" if degrees >= bad else "warm" if degrees >= warm else "plain"
 
 
-def pc_box(canvas, y, width, pc):
+def pc_box(canvas, y, width, pc, tall=1):
     """A Linux machine as the Mac above it: CPU and GPU as graphs, memory as a meter;
     beside them, or under them, how hot it is, what the card draws, and its
     runner. A machine that does not answer says so, and shows no old numbers as
     if they were now."""
     now = pc.now if pc.reachable() else {}
     wide = width >= 96
-    height = 5 if wide else 8
+    height = (5 if wide else 8) + 2 * (tall - 1)
     host = pc.host.split("@")[-1] if pc.host else "here"
     if pc.reachable():
         right_side = f"{host} · load {now['load']:.1f} · {now['threads']:.0f} threads" if now.get("load") is not None else host
@@ -93,21 +102,8 @@ def pc_box(canvas, y, width, pc):
         right_side = f"{host} · not answering"
     frame(canvas, y, 0, height, width, pc.name, right_side)
     half = (width - 4) // 2 - 1 if wide else width - 4
-    row = y + 1
-    for name, value, history in (("CPU", now.get("cpu"), pc.cpu), ("GPU", now.get("gpu"), pc.gpu)):
-        canvas.put(row, 2, name, "label")
-        spark(canvas, row, 7, half - 13, history if pc.reachable() else [])
-        if value is None:
-            canvas.put(row, half - 4, "  —", "dim")
-        else:
-            canvas.put(row, half - 4, f"{value:3.0f} %", heat(value / 100))
-        row += 1
-    used = now.get("memory")
-    canvas.put(row, 2, "RAM", "label")
-    if used:
-        meter(canvas, row, 7, half - 22, used[0] / used[1])
-        canvas.put(row, half - 13, f"{used[0]:4.1f} / {used[1]:.0f} GB", "plain")
-    row = y + 1 if wide else row + 1
+    row = gauges(canvas, y + 1, half, now, pc.cpu if pc.reachable() else [], pc.gpu if pc.reachable() else [], tall)
+    row = y + 1 if wide else row
     x = half + 4 if wide else 2
     canvas.put(row, x, "Heat", "label")
     # Ryzen's Tctl runs in the 80s under a build and holds to 95; the card's
@@ -157,11 +153,13 @@ def runners_box(canvas, y, width, runners, queue, title="runners"):
         rows.append((runner, state, job, since, last, busy))
     height = 2 + len(rows) + sum(1 for row in rows if row[5] and not wide)
     busy_count = sum(1 for row in rows if row[1] == "running")
-    frame(canvas, y, 0, height, width, title, f"{busy_count} of {len(rows)} busy")
+    failed = any(row[4] and "fail" in row[4] and row[1] != "running" for row in rows)
+    frame(canvas, y, 0, height, width, title, f"{busy_count} of {len(rows)} busy", "bad" if failed else None)
     line = y + 1
     for runner, state, job, since, last, busy in rows:
         style = "strong" if state == "running" else "dim" if state in ("stopped", "not set up") else "plain"
-        canvas.put(line, 2, MARKS.get(state, "·"), "good" if state == "running" else style)
+        mark = spin(MARKS["running"]) if state == "running" else MARKS.get(state, "·")
+        canvas.put(line, 2, mark, "good" if state == "running" else style)
         canvas.put(line, 4, runner.name, style)
         words = f"Running {job}" if state == "running" else WORDS[state]
         canvas.put(line, 11, words, style)
@@ -175,7 +173,7 @@ def runners_box(canvas, y, width, runners, queue, title="runners"):
         if busy:
             share, steps, left = progress(busy)
             at, place = (line, 34) if wide else (line + 1, 11)
-            meter(canvas, at, place, 16, share, "good")
+            meter(canvas, at, place, 16, share, "good", scan=True)
             canvas.put(at, place + 18, steps[:max(0, width - place - 22 - len(left) - len(when) - 6)], "dim")
             if left:
                 when = f"{left} · {when}" if wide else when
@@ -205,7 +203,7 @@ def put_on(canvas, line, at, width, run, labels, on, style):
                    "warm" if where.startswith("waiting") else "strong" if style == "dim" else style)
 
 
-def github_box(canvas, y, width, runs, repos, picked=None, working=None, on=None):
+def github_box(canvas, y, width, runs, repos, picked=None, working=None, on=None, age=None):
     working = working or {}
     on = on or {}
     # Every run says which repository it is of as soon as there are two, not only when the
@@ -218,7 +216,11 @@ def github_box(canvas, y, width, runs, repos, picked=None, working=None, on=None
     branch_at = 4 + name_w + 1
     sha_at = branch_at + branch_w + 1
     repo_at = sha_at + 8
-    frame(canvas, y, 0, 2 + len(runs), width, "github", ", ".join(repos) if len(", ".join(repos)) < width - 16 else f"{len(repos)} repositories")
+    # How old what is shown is: GitHub is asked every 20 seconds, and a list of minutes ago is not now.
+    told = "" if age is None else f" · {span(age)} ago" + (" · stale" if age > 120 else "")
+    names = ", ".join(repos) if len(", ".join(repos)) < width - 16 - len(told) else f"{len(repos)} repositories"
+    failed = any(run.get("conclusion") in ("failure", "timed_out", "startup_failure") for run in runs)
+    frame(canvas, y, 0, 2 + len(runs), width, "github", names + told, "bad" if failed else None)
     for line, run in enumerate(runs, start=y + 1):
         doing = working.get(run.get("databaseId"))
         if run.get("databaseId") == picked:
@@ -232,7 +234,7 @@ def github_box(canvas, y, width, runs, repos, picked=None, working=None, on=None
             continue
         done = run.get("status") == "completed"
         conclusion = run.get("conclusion") or ""
-        mark = RESULTS.get(conclusion, "·") if done else "…" if run.get("status") == "in_progress" else "·"
+        mark = RESULTS.get(conclusion, "·") if done else spin("…") if run.get("status") == "in_progress" else "·"
         style = {"success": "good", "failure": "bad"}.get(conclusion, "dim") if done else "warm"
         canvas.put(line, 2, mark, style)
         canvas.put(line, 4, run.get("workflowName", "")[:name_w], "strong" if not done else "plain")
@@ -262,6 +264,7 @@ def builds_box(canvas, y, width, builds, title="builds"):
     for line, build in enumerate(shown, start=y + 1):
         mark, style = BUILD_MARKS[build["status"]]
         running = build["status"] == "running"
+        mark = spin(mark) if running else mark
         canvas.put(line, 2, mark, style)
         canvas.put(line, 4, build["name"][:18], "strong" if running else "plain")
         canvas.put(line, 23, build["branch"][:20], "dim")
@@ -341,6 +344,9 @@ def with_remote(runners, pcs):
     return list(runners) + more
 
 
+STAMP_AT = re.compile(r"\[?\d{4}-\d\d-\d\d[ T][\d:.]+Z?\]?:? ")
+
+
 def log_box(canvas, y, width, height, runners, shown):
     """The log of the runner shown, its newest lines at the foot; a job's start in white, its end in
     the colour of how it ended. All the runners are tabs on the top edge: the one shown on white, the
@@ -348,7 +354,7 @@ def log_box(canvas, y, width, height, runners, shown):
     runner = runners[shown]
     right_text = "←→ other log" if width >= 70 else ""
     frame(canvas, y, 0, height, width, "log", right_text)
-    labels = [f" {'● ' if other.state()[0] == 'running' else ''}{other.name} " for other in runners]
+    labels = [f" {spin('●') + ' ' if other.state()[0] == 'running' else ''}{other.name} " for other in runners]
     start = 4 + len("log") + 2
     room = width - 2 - start - (len(right_text) + 5 if right_text else 1)
     first, last = fit_tabs([len(label) for label in labels], shown, max(room, len(labels[shown])))
@@ -360,7 +366,11 @@ def log_box(canvas, y, width, height, runners, shown):
     for at, line in enumerate(lines, start=y + 1):
         style = ("bad" if "Failed" in line else "good" if "Succeeded" in line
                  else "strong" if "Running job" in line else "dim")
-        canvas.put(at, 2, line[:width - 4], style)
+        # The time each line starts with, darker than what it says.
+        stamp = STAMP_AT.match(line)
+        cut = stamp.end() if stamp else 0
+        canvas.put(at, 2, line[:min(cut, width - 4)], "frame")
+        canvas.put(at, 2 + cut, line[cut:width - 4], style)
 
 
 def footer(canvas, y, width, note, picking=None):
@@ -391,7 +401,7 @@ def footer(canvas, y, width, note, picking=None):
             shown.append((key, words))
     x = 1
     for key, words in shown:
-        canvas.put(y, x, key, "strong")
+        canvas.put(y, x, key, "key")
         canvas.put(y, x + len(key) + 1, words, "label")
         x += len(key) + len(words) + 4
 
@@ -403,30 +413,40 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
     width, height = canvas.width, canvas.height
     canvas.put(0, 1, "◐ runnerdeck", "logo")
     canvas.put(0, 14, "▓▒░", "glitch")
-    awake = "awake" if alive(cfg.awake) else "may sleep"
-    told = " · notifying" if alive(cfg.watch) else ""
+    # The right of the head, from the right: the time (it moves: the screen is live), whether the
+    # machine stays awake, whether an update is ready.
+    parts = [(time.strftime("%H:%M:%S"), "label")]
     if runners:
-        right(canvas, 0, width + 1, f"{awake}{told}", "good" if alive(cfg.awake) else "warm")
+        awake = alive(cfg.awake)
+        parts.append((("awake" if awake else "may sleep") + (" · notifying" if alive(cfg.watch) else ""), "good" if awake else "warm"))
     if getattr(queue, "update_ready", False):
-        right(canvas, 0, width - (len(awake) + len(told) + 4 if runners else 0) + 1, "update ready · u", "warm")
+        parts.append(("update ready · u", "warm"))
+    edge = width - 1
+    for text, style in parts:
+        edge -= len(text)
+        canvas.put(0, edge, text, style)
+        edge -= 3
+    # The graphs grow a row where the screen has the room: never at the cost of the runs and the log.
+    boxes = bool(machine) + sum(1 for pc in pcs if pc.reachable())
+    tall = 2 if boxes and height >= 36 + 6 * boxes else 1
     y = 1
     if machine:
-        y = mac_box(canvas, y, width, machine)
+        y = mac_box(canvas, y, width, machine, tall)
     # A computer that did not answer has no box: a line in the head says which.
     for pc in pcs:
         if not pc.reachable():
             continue
         if getattr(pc, "kind", "linux") == "macos":
-            y = mac_box(canvas, y, width, pc)
+            y = mac_box(canvas, y, width, pc, tall)
             if pc.runners:
                 y = runners_box(canvas, y, width, pc.runner_list(), queue, f"runners · {pc.name}")
         else:
-            y = pc_box(canvas, y, width, pc)
+            y = pc_box(canvas, y, width, pc, tall)
             rows = pc.runner_list() if hasattr(pc, "runner_list") else []
             if rows:
                 y = runners_box(canvas, y, width, rows, queue, f"runners · {pc.name}")
     # The one word of the health: all good, or what is red and stale.
-    at = 15
+    at = 18
     if health:
         word, style = health.words()
         if word:
@@ -437,7 +457,7 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
         words = "· " + ", ".join(pc.name for pc in down) + " not answering"
         if len(down) == 1 and getattr(down[0], "why", ""):
             words += f": {down[0].why}"
-        canvas.put(0, at, words[:max(0, width - at - 30)], "dim")
+        canvas.put(0, at, words[:max(0, edge - at)], "dim")
     if runners:
         y = runners_box(canvas, y, width, runners, queue)
     here = recent_builds()
@@ -451,8 +471,14 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
                          repo_labels(cfg.repos) if len(cfg.repos) > 1 else None)
     room = height - 1 - y
     if not queue.runs and queue.problem and room >= 3:
-        frame(canvas, y, 0, 3, width, "github", "no runs")
+        frame(canvas, y, 0, 3, width, "github", "no runs", "warm")
         canvas.put(y + 1, 2, queue.problem[:width - 4], "warm")
+        y += 3
+    elif queue.runs is None and cfg.repos and room >= 3:
+        # Not a silent gap while gh is first asked: it takes a few seconds.
+        frame(canvas, y, 0, 3, width, "github", "reading")
+        canvas.put(y + 1, 2, spin("…"), "warm")
+        canvas.put(y + 1, 4, f"asking GitHub for the last runs of {', '.join(cfg.repos)}"[:width - 6], "dim")
         y += 3
     # Before the runs, which give way first: the box is left out where it does not fit.
     if height_of(health) and room >= height_of(health) + 7:
@@ -460,7 +486,7 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
         room = height - 1 - y
     if queue.runs and room >= 5:
         y = github_box(canvas, y, width, queue.runs[:max(1, min(len(queue.runs), room - 7))], cfg.repos, picked, queue.working,
-                       getattr(queue, "on", None))
+                       getattr(queue, "on", None), time.time() - queue.at if getattr(queue, "at", None) else None)
     logs = with_remote(runners, pcs)
     if logs and height - 1 - y >= 3:
         log_box(canvas, y, width, height - 1 - y, logs, shown % len(logs))
@@ -470,3 +496,13 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
         popup(canvas, dialog)
     # Last: its keys are read while a popup is up too.
     footer(canvas, height - 1, width, "" if dialog else note, picking)
+
+
+def moving(runners, queue, pcs=()):
+    """Whether anything on the screen moves: a runner with a job, a run or a build that is going,
+    a thing being done. The screen is drawn four times a second then, else once."""
+    if getattr(queue, "working", None) or any(run.get("status") == "in_progress" for run in queue.runs or []):
+        return True
+    if queue.runs is None and getattr(queue, "cfg", None) and queue.cfg.repos and not queue.problem:
+        return True
+    return any(runner.state()[0] == "running" for runner in with_remote(runners, pcs))

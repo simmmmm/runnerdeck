@@ -1761,14 +1761,67 @@ for tier in ({"TERM": "xterm-256color"}, {"TERM": "linux"}, {"NO_COLOR": "1"}):
     # Where there is no colour, nothing may ask for one; and an empty meter cell is a dot there, not a dim block.
     if terminal.depth(tier) == 0:
         assert not any("38;" in v or "48;" in v or v in ("32", "33", "36") for v in terminal.STYLE.values()), terminal.STYLE
-    assert (terminal.FULL[0], terminal.EMPTY[0]) == ((("■", "·") if terminal.WINDOWS else ("▰", "▱")) if terminal.depth(tier) else ("█", "·"))
+    terminal.STYLE.clear()
+    assert (terminal.GLYPH["full"], terminal.GLYPH["empty"]) == (("■", "·") if not terminal.rich(tier) else ("▰", "▱"))
 assert names[256] == names[8] == names[0], names
 terminal.colours({"TERM": "xterm-256color"})
 screen_80 = terminal.Screen(types.SimpleNamespace(size=lambda: (30, 80)))
 boxes.paint(screen_80, two, [], nothing, None, 0, "", pcs=[])
 assert all(style in terminal.STYLE for row in screen_80.rows for _, style in row), "a style the palette lacks"
 terminal.STYLE.clear()
-terminal.EMPTY[0], terminal.FULL[0] = "·", "█"
+terminal.GLYPH.update({"full": "█", "empty": "·", "spin": "", "braille": False})
+
+# braille graphs: two readings to a cell, filled from the foot, hotter higher up; blocks where the font has no braille
+terminal.GLYPH["braille"] = True
+_g = terminal.Grid(2, 4)
+terminal.graph(_g, 0, 0, 4, 2, [0, 100, 50, 50])
+_rows = _g.text().split("\n")
+# Four readings in four cells: two empty cells, then (0, 100) and (50, 50). 100 fills the right column of both rows,
+# 50 the foot row only; an empty cell is a dotted floor.
+assert _rows == ["  ⢸", "⣀⣀⢸⣿"], _rows
+terminal.GLYPH["braille"] = False
+_g = terminal.Grid(2, 4)
+terminal.graph(_g, 0, 0, 4, 2, [0, 100, 50, 50])
+assert _g.text().split("\n")[-1] == "▁█▅▅", _g.text()                                                # no braille: the blocks, in the foot row
+
+# what moves: nothing where MOTION is off, so --status and the tests see the still marks
+terminal.GLYPH["spin"] = "ab"
+assert terminal.spin("●") == "●"
+terminal.MOTION[0] = True
+assert terminal.spin("●") in "ab"
+terminal.MOTION[0] = False
+terminal.GLYPH["spin"] = ""
+
+
+class Recorder(terminal.Grid):
+    def __init__(self, height, width):
+        super().__init__(height, width)
+        self.puts = []
+
+    def put(self, y, x, text, style=""):
+        self.puts.append((y, x, text, style))
+        super().put(y, x, text, style)
+
+
+# a box that holds something wrong says so in its corners and title too; the marks in it say what
+_r = Recorder(10, 100)
+boxes.github_box(_r, 0, 100, [{"databaseId": 1, "workflowName": "CI", "headBranch": "main", "headSha": "abc1234", "status": "completed",
+                               "conclusion": "failure", "repo": "a/b", "createdAt": "2026-10-31T16:00:00Z"}], ["a/b"], age=200)
+assert ("title-bad" in [st for y, x, t, st in _r.puts if t == " github "]) and "✗" in _r.text(), _r.puts[:4]
+assert "3 min ago · stale" in _r.text().splitlines()[0], _r.text()                                      # how old the list is
+_r = Recorder(10, 100)
+boxes.github_box(_r, 0, 100, [{"databaseId": 1, "workflowName": "CI", "headBranch": "main", "headSha": "abc1234", "status": "completed",
+                               "conclusion": "success", "repo": "a/b", "createdAt": "2026-10-31T16:00:00Z"}], ["a/b"], age=8)
+assert "title" in [st for y, x, t, st in _r.puts if t == " github "] and "8 s ago" in _r.text() and "stale" not in _r.text()
+
+# before gh first answers: a box that says it is asking, not a gap
+_one = configured("[deck]\nrepos = o/alpha\n")
+_wait = types.SimpleNamespace(runs=None, requests=[], problem="", jobs={}, working={}, said="", cfg=_one)
+assert "╭─ github" in drawn(_one, _wait) and "asking GitHub" in drawn(_one, _wait)
+assert boxes.moving([], _wait) and not boxes.moving([], nothing)
+# the head: the time at the right, the health's word after the name and not over its trail
+_head = drawn(two, nothing).splitlines()[0]
+assert _head.startswith(" ◐ runnerdeck ▓▒░") and re.search(r"\d\d:\d\d:\d\d$", _head), _head
 
 grid = terminal.Grid(11, 80)
 intro.paint(grid, intro.STEPS + intro.HOLD, "2 repositories")
