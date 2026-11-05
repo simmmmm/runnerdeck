@@ -70,6 +70,23 @@ REFERENCE = """\
 # input sha = {sha}              a workflow input, from a field or a plain word
 # input mode = {mode}
 #
+# [health]
+# A line in the head (all good, or N red, N stale) and a box: what is red and for how long, what is flaky,
+# the free disk, the last good Smoke, runs that wait too long, open issues with a label. Off without it.
+# See docs/health.md.
+# The repositories to watch. The repos of [deck] if you leave it out.
+# repos = owner/name, owner/other
+# Extra folders whose free space is shown, next to the runner folder. Low is under disk_min GiB.
+# disk = /mnt/data-games
+# disk_min = 20
+# The workflows that run weekly: repo:Workflow. Stale after smoke_days days without a good run.
+# smoke = owner/name:Smoke
+# smoke_days = 8
+# A run that is queued for more than this many minutes is shown (a push waits when the PC is off).
+# queued_min = 30
+# The issues with this label are listed. o opens the chosen one.
+# label = ci-red
+#
 # [names]
 # Short names for jobs in the notifications.
 # build = Build
@@ -100,6 +117,8 @@ class Config:
         self.approval = {"workflows": [], "label": ""}
         self.asked = None
         self.kinds = []
+        # The [health] section, or None: then there is no health box.
+        self.health = None
         self.names = {}
         self.version = "2.338.2"
         self.keychain = ""
@@ -186,11 +205,49 @@ def configure(config):
     for section in config.sections():
         if section.lower().startswith("request "):
             cfg.kinds.append(request_kind(section[8:].strip(), config[section]))
+    if config.has_section("health"):
+        cfg.health = health_settings(config["health"], cfg)
     # A job by its workflow's name: the runner's log says only the job's own.
     cfg.names = dict(config["names"]) if config.has_section("names") else {}
     first = os.path.join(cfg.local["dir"] if cfg.local else os.path.join(cfg.home, "actions-runner"), "")
     cfg.awake, cfg.watch, cfg.jobs = (first + name for name in ("caffeinate.pid", "watch.pid", "jobs.log"))
     return cfg
+
+
+def health_settings(section, cfg):
+    """The [health] section, checked: nothing from it but repository names, plain words, folders and
+    numbers reaches `gh` or the disk."""
+    def bad(why):
+        return ConfigError(f"[health]: {why}")
+
+    def listed(key):
+        return [word.strip() for word in section.get(key, "").split(",") if word.strip()]
+
+    def number(key, default):
+        try:
+            value = int(section.get(key, default))
+        except ValueError:
+            value = 0
+        if value < 1:
+            raise bad(f"{key} is a whole number, 1 or more")
+        return value
+    repos = listed("repos") or list(cfg.repos)
+    if not all(SLUG.match(repo) for repo in repos):
+        raise bad("repos = owner/name, owner/other")
+    disk = listed("disk")
+    if not all(FOLDER.match(path) for path in disk):
+        raise bad("disk = a folder, like /mnt/data-games")
+    smoke = []
+    for entry in listed("smoke"):
+        repo, _, workflow = entry.partition(":")
+        if not SLUG.match(repo) or not WORD.match(workflow):
+            raise bad("smoke = owner/name:Workflow")
+        smoke.append((repo, workflow))
+    label = section.get("label", "ci-red").strip()
+    if not WORD.match(label):
+        raise bad(f"label = a name, not {label!r}")
+    return {"repos": repos, "disk": [os.path.expanduser(path) for path in disk], "disk_min": number("disk_min", "20"),
+            "smoke": smoke, "smoke_days": number("smoke_days", "8"), "queued_min": number("queued_min", "30"), "label": label}
 
 
 def load(path=None):

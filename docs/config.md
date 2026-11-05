@@ -20,6 +20,7 @@ Press `m` for the settings. In one list you can add a runner, add or take out a 
 | `[local]` | The runners on this machine. Leave it out if you only want to watch. |
 | `[host NAME]` | Another machine. One section for each machine. |
 | `[approval]` | Workflows that start only after you say yes. |
+| `[health]` | The health box and its word in the head. Off without it. See [Health](health.md). |
 | `[names]` | Short names for jobs in the notifications. |
 
 ## Examples

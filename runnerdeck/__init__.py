@@ -40,6 +40,9 @@ Add a repository, say what runners it has, and that is all: a config file
     workflows = Deploy                     # an issue "Deploy: <branch> <sha>" ...
     label = deploy-request                 # ... with this label stands on the screen as waiting
 
+    [health]                               # optional: a box and a head word for the CI's health
+    smoke = owner/name:Smoke               # see docs/health.md
+
 Nothing here starts an approval workflow by itself: an issue only asks; a or
 enter in the screen starts it, after a question, from that branch if it is
 still at that commit, and closes the issue.

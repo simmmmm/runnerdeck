@@ -5,6 +5,7 @@ from .util import STAMP, ago, moment
 from .builds import recent as recent_builds
 from .system import alive
 from .github import row_of
+from .health import ISSUE_ROW, health_box, height_of
 from .machines import power, run, watts
 from .terminal import frame, heat, meter, popup, right, spark
 
@@ -373,11 +374,12 @@ def footer(canvas, y, width, note, picking=None):
     leave = "quit, runners stay on" if width >= 100 else "quit"
     general = (("m", "settings"), ("s", "start"), ("x", "stop"), ("←→", "logs"), ("q", leave))
     keys = {"run": (("↑↓", "choose"), ("c", "cancel"), ("r", "run again"), ("l", "log"), ("o", "open"), ("esc", "back")) + general,
+            "issue": (("↑↓", "choose"), ("o", "open"), ("esc", "back")) + general,
             "request": (("↑↓", "choose"), ("enter", "start"), ("d", "decline"), ("esc", "back")) + general,
             "dialog": (("y", "yes"), ("n", "no"), ("← →", "choose"), ("enter", "answer")),
             "field": (("enter", "set up"), ("esc", "cancel")),
             None: (("↑↓", "runs"),) + general}[picking]
-    must = {"↑↓", "esc", "q"} if picking in ("run", "request", None) else {key for key, _ in keys}
+    must = {"↑↓", "esc", "q"} if picking in ("run", "request", "issue", None) else {key for key, _ in keys}
     used = sum(len(k) + len(w) + 4 for k, w in keys if k in must)
     shown = []
     for key, words in keys:
@@ -394,7 +396,7 @@ def footer(canvas, y, width, note, picking=None):
         x += len(key) + len(words) + 4
 
 
-def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog=None, pcs=()):
+def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog=None, pcs=(), health=None):
     """The whole screen: the head, this machine and the others, the runners,
     GitHub's last runs and a log, the log taking what is left and GitHub
     giving way first."""
@@ -422,12 +424,19 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
             rows = pc.runner_list() if hasattr(pc, "runner_list") else []
             if rows:
                 y = runners_box(canvas, y, width, rows, queue, f"runners · {pc.name}")
+    # The one word of the health: all good, or what is red and stale.
+    at = 15
+    if health:
+        word, style = health.words()
+        if word:
+            canvas.put(0, at, word, style)
+            at += len(word) + 2
     down = [pc for pc in pcs if getattr(pc, "failed", False) and not pc.reachable()]
     if down:
         words = "· " + ", ".join(pc.name for pc in down) + " not answering"
         if len(down) == 1 and getattr(down[0], "why", ""):
             words += f": {down[0].why}"
-        canvas.put(0, 15, words[:max(0, width - 15 - 30)], "dim")
+        canvas.put(0, at, words[:max(0, width - at - 30)], "dim")
     if runners:
         y = runners_box(canvas, y, width, runners, queue)
     here = recent_builds()
@@ -444,6 +453,10 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
         frame(canvas, y, 0, 3, width, "github", "no runs")
         canvas.put(y + 1, 2, queue.problem[:width - 4], "warm")
         y += 3
+    # Before the runs, which give way first: the box is left out where it does not fit.
+    if height_of(health) and room >= height_of(health) + 7:
+        y = health_box(canvas, y, width, health, picked)
+        room = height - 1 - y
     if queue.runs and room >= 5:
         y = github_box(canvas, y, width, queue.runs[:max(1, min(len(queue.runs), room - 7))], cfg.repos, picked, queue.working,
                        getattr(queue, "on", None))
@@ -451,7 +464,7 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
     if logs and height - 1 - y >= 3:
         log_box(canvas, y, width, height - 1 - y, logs, shown % len(logs))
     picking = (("field" if "field" in dialog else "dialog") if dialog else None if picked is None
-               else "request" if picked < 0 else "run")
+               else "request" if picked < 0 else "issue" if picked >= ISSUE_ROW else "run")
     if dialog:
         popup(canvas, dialog)
     # Last: its keys are read while a popup is up too.

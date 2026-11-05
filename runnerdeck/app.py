@@ -13,6 +13,7 @@ from .util import read
 from .system import WINDOWS
 from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, runner_rows, set_computer, set_section
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
+from .health import Health, open_issue
 from .github import Queue, act_on_run, approve, close, failed_log, row_of
 from .update import behind, remember, update
 from .machines import Pc, RemoteMac, build_machines, probe
@@ -23,7 +24,7 @@ from .intro import facts, play as opening
 from .setup import Wizard, menu, run as run_setup, show_text
 
 
-def show(window, cfg, runners, queue, machine, pcs=()):
+def show(window, cfg, runners, queue, machine, pcs=(), health=None):
     colours()
 
     def watch_for_update():
@@ -197,7 +198,7 @@ def show(window, cfg, runners, queue, machine, pcs=()):
         if queue.said:
             note, queue.said = queue.said, ""
         screen = Screen(window)
-        paint(screen, cfg, runners, queue, machine, shown, note, picked, dialog, pcs)
+        paint(screen, cfg, runners, queue, machine, shown, note, picked, dialog, pcs, health)
         screen.flush()
         key = window.key()
         if key == -1:
@@ -243,7 +244,7 @@ def show(window, cfg, runners, queue, machine, pcs=()):
             dialog["quit"] = True
             continue
         requests, runs = queue.requests, queue.runs or []
-        items = [*requests, *runs]
+        items = [*requests, *(health.issues if health else []), *runs]
         if key in (K_UP, K_DOWN) and items:
             rows = [row_of(item) for item in items]
             step = 1 if key == K_DOWN else -1
@@ -259,13 +260,13 @@ def show(window, cfg, runners, queue, machine, pcs=()):
             request = chosen if chosen and row_of(chosen) < 0 else requests[0] if requests else None
             if request:
                 dialog = asks_for(request, "d")
-        elif chosen and row_of(chosen) > 0 and key in (ord("c"), ord("r")):
+        elif chosen and "databaseId" in chosen and key in (ord("c"), ord("r")):
             dialog = asks_for(chosen, chr(key))
-        elif chosen and row_of(chosen) > 0 and key == ord("l"):
+        elif chosen and "databaseId" in chosen and key == ord("l"):
             note = "Reading the log…"
             show_text(window, f"{chosen.get('workflowName', 'run')} · what failed", failed_log(chosen))
         elif chosen and row_of(chosen) > 0 and key == ord("o"):
-            note = act_on_run(chosen, "o")[0]
+            note = (act_on_run(chosen, "o") if "databaseId" in chosen else open_issue(chosen))[0]
         elif key == ord("x"):
             busy = [runner.name for runner in runners if runner.state()[0] == "running"]
             def stop():
@@ -397,12 +398,12 @@ def terminal(work):
                  "Try: TERM=xterm-256color runnerdeck")
 
 
-def screen(cfg, runners, queue, here, pcs, intro=True):
+def screen(cfg, runners, queue, here, pcs, intro=True, health=None):
     def work(console):
         colours()
         if intro:
             opening(console, facts(cfg, runners, pcs))
-        show(console, cfg, runners, queue, here, pcs)
+        show(console, cfg, runners, queue, here, pcs, health)
     terminal(work)
 
 
@@ -467,7 +468,7 @@ def main(args=None):
     if "--status" in args:
         here, pcs = build_machines(cfg, once=True)
         grid = Grid(34 + 5 * len(pcs), 100)
-        paint(grid, cfg, runners, Queue(cfg, once=True), here, 0, "", pcs=pcs)
+        paint(grid, cfg, runners, Queue(cfg, once=True), here, 0, "", pcs=pcs, health=Health(cfg, once=True) if cfg.health else None)
         print(grid.text())
         return
     if any(not runner.running() for runner in runners):
@@ -476,4 +477,5 @@ def main(args=None):
     if any(runner.running() for runner in runners):
         keep_watch(cfg)
     here, pcs = build_machines(cfg)
-    screen(cfg, runners, Queue(cfg), here, pcs, "--no-intro" not in args and not os.environ.get("RUNNERDECK_NO_INTRO"))
+    screen(cfg, runners, Queue(cfg), here, pcs, "--no-intro" not in args and not os.environ.get("RUNNERDECK_NO_INTRO"),
+           Health(cfg) if cfg.health else None)
