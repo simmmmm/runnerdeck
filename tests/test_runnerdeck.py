@@ -1752,7 +1752,7 @@ finally:
 
 # the look: colours by what the terminal has, and the opening
 from runnerdeck import intro
-assert terminal.depth({"TERM": "xterm-256color"}) == 256 and terminal.depth({"TERM": "linux"}) == 8
+assert terminal.depth({"TERM": "xterm-256color"}) == 256 and (terminal.WINDOWS or terminal.depth({"TERM": "linux"}) == 8)
 assert terminal.depth({"TERM": "xterm-256color", "NO_COLOR": "1"}) == 0 and terminal.depth({"TERM": "dumb"}) == 0
 names = {}
 for tier in ({"TERM": "xterm-256color"}, {"TERM": "linux"}, {"NO_COLOR": "1"}):
@@ -1763,7 +1763,7 @@ for tier in ({"TERM": "xterm-256color"}, {"TERM": "linux"}, {"NO_COLOR": "1"}):
         assert not any("38;" in v or "48;" in v or v in ("32", "33", "36") for v in terminal.STYLE.values()), terminal.STYLE
     terminal.STYLE.clear()
     assert (terminal.GLYPH["full"], terminal.GLYPH["empty"]) == (("■", "·") if not terminal.rich(tier) else ("▰", "▱"))
-assert names[256] == names[8] == names[0], names
+assert len(set(map(frozenset, names.values()))) == 1, names
 terminal.colours({"TERM": "xterm-256color"})
 screen_80 = terminal.Screen(types.SimpleNamespace(size=lambda: (30, 80)))
 boxes.paint(screen_80, two, [], nothing, None, 0, "", pcs=[])
@@ -1813,6 +1813,23 @@ _r = Recorder(10, 100)
 boxes.github_box(_r, 0, 100, [{"databaseId": 1, "workflowName": "CI", "headBranch": "main", "headSha": "abc1234", "status": "completed",
                                "conclusion": "success", "repo": "a/b", "createdAt": "2026-10-31T16:00:00Z"}], ["a/b"], age=8)
 assert "title" in [st for y, x, t, st in _r.puts if t == " github "] and "8 s ago" in _r.text() and "stale" not in _r.text()
+
+# an old failure that a later run of the same workflow made good: not red
+_r = Recorder(10, 100)
+boxes.github_box(_r, 0, 100, [{"databaseId": 2, "workflowName": "CI", "headBranch": "main", "headSha": "abc1235", "status": "completed",
+                               "conclusion": "success", "repo": "a/b", "createdAt": "2026-10-31T17:00:00Z"},
+                              {"databaseId": 1, "workflowName": "CI", "headBranch": "main", "headSha": "abc1234", "status": "completed",
+                               "conclusion": "failure", "repo": "a/b", "createdAt": "2026-10-31T16:00:00Z"}], ["a/b"])
+assert "title" in [st for y, x, t, st in _r.puts if t == " github "], _r.puts[:4]
+
+# the head at 80 columns, with all of it: the health's word and what is to be done stay whole, the time gives way
+_full = types.SimpleNamespace(runs=[], requests=[], problem="", jobs={}, working={}, said="", update_ready=True)
+_health = types.SimpleNamespace(words=lambda: ("2 red · 3 stale · low disk", "bad"), loaded=False)
+_g = terminal.Grid(30, 80)
+boxes.paint(_g, two, [types.SimpleNamespace(name="box", state=lambda: ("listening", "", None, ""), tail=lambda: [])], _full, None, 0, "",
+            pcs=[], health=_health)
+_head = _g.text().splitlines()[0]
+assert "2 red · 3 stale · low disk" in _head and "update ready · u" in _head and ("awake" in _head or "may sleep" in _head), _head
 
 # before gh first answers: a box that says it is asking, not a gap
 _one = configured("[deck]\nrepos = o/alpha\n")

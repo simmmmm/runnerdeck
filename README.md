@@ -55,7 +55,7 @@ The screen is neon green and cyan on a dark ground. Amber means warm. Red means 
 - The keys at the foot are on a ground of their own, so you can find them quickly.
 - A busy runner, a run that goes on, and a build that runs have a spinner. A light runs over the meter of a busy job. The time in the head moves each second. Then you know that the screen is live.
 - The github box says how old the list is (`8 s ago`). After two minutes without an answer it says `stale`. Before the first answer, it says that it asks GitHub.
-- When the terminal has many rows, the CPU and GPU graphs are two rows high, in braille dots. The screen never takes these rows from the runs or the log.
+- On a tall terminal (about 42 rows for one machine, 6 more for each other machine), the CPU and GPU graphs are two rows high, in braille dots.
 - When you start the program, a short opening shows the logo. It takes about one second. Press any key to skip it. To turn it off, use `--no-intro` or set `RUNNERDECK_NO_INTRO=1`. `--status` has no opening.
 - Nothing moves with `RUNNERDECK_CALM=1`: no opening, no spinners. The screen is then drawn one time each second. When something moves, it is drawn four times each second.
 - A terminal with 8 colours (the Linux console, for example) gets 8 colours. With `NO_COLOR` set, or in a terminal that says it has no colours, the screen uses bold, dim, and reverse only, and nothing moves.

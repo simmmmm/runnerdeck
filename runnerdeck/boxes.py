@@ -219,7 +219,12 @@ def github_box(canvas, y, width, runs, repos, picked=None, working=None, on=None
     # How old what is shown is: GitHub is asked every 20 seconds, and a list of minutes ago is not now.
     told = "" if age is None else f" · {span(age)} ago" + (" · stale" if age > 120 else "")
     names = ", ".join(repos) if len(", ".join(repos)) < width - 16 - len(told) else f"{len(repos)} repositories"
-    failed = any(run.get("conclusion") in ("failure", "timed_out", "startup_failure") for run in runs)
+    # Red while a workflow's newest finished run failed, not for an old failure that a later run made good.
+    newest = {}
+    for run in sorted(runs, key=lambda run: run.get("createdAt", ""), reverse=True):
+        if run.get("status") == "completed":
+            newest.setdefault((run.get("repo"), run.get("workflowName")), run.get("conclusion"))
+    failed = any(conclusion in ("failure", "timed_out", "startup_failure") for conclusion in newest.values())
     frame(canvas, y, 0, 2 + len(runs), width, "github", names + told, "bad" if failed else None)
     for line, run in enumerate(runs, start=y + 1):
         doing = working.get(run.get("databaseId"))
@@ -415,14 +420,25 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
     canvas.put(0, 14, "▓▒░", "glitch")
     # The right of the head, from the right: the time (it moves: the screen is live), whether the
     # machine stays awake, whether an update is ready.
-    parts = [(time.strftime("%H:%M:%S"), "label")]
+    # The left of the head first: the name, then the health's word; then the right, from the right, as
+    # far as there is room: the time goes first, as it only says that the screen is live.
+    at = 18
+    if health:
+        word, style = health.words()
+        if word:
+            canvas.put(0, at, word, style)
+            at += len(word) + 2
+    parts = []
+    if getattr(queue, "update_ready", False):
+        parts.append(("update ready · u", "warm"))
     if runners:
         awake = alive(cfg.awake)
         parts.append((("awake" if awake else "may sleep") + (" · notifying" if alive(cfg.watch) else ""), "good" if awake else "warm"))
-    if getattr(queue, "update_ready", False):
-        parts.append(("update ready · u", "warm"))
+    parts.append((time.strftime("%H:%M:%S"), "label"))
+    while parts and width - 1 - sum(len(text) + 3 for text, _ in parts) < at:
+        parts.pop()
     edge = width - 1
-    for text, style in parts:
+    for text, style in reversed(parts):
         edge -= len(text)
         canvas.put(0, edge, text, style)
         edge -= 3
@@ -445,13 +461,6 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
             rows = pc.runner_list() if hasattr(pc, "runner_list") else []
             if rows:
                 y = runners_box(canvas, y, width, rows, queue, f"runners · {pc.name}")
-    # The one word of the health: all good, or what is red and stale.
-    at = 18
-    if health:
-        word, style = health.words()
-        if word:
-            canvas.put(0, at, word, style)
-            at += len(word) + 2
     down = [pc for pc in pcs if getattr(pc, "failed", False) and not pc.reachable()]
     if down:
         words = "· " + ", ".join(pc.name for pc in down) + " not answering"
