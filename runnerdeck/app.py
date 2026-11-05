@@ -20,6 +20,7 @@ from .machines import Pc, RemoteMac, build_machines, probe
 from .terminal import ConsoleTerminal, CursesTerminal, ENTER, Grid, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
 from .boxes import paint, with_remote
 from .builds import run_recorded
+from .intro import facts, play as opening
 from .setup import Wizard, menu, run as run_setup, show_text
 
 
@@ -397,8 +398,13 @@ def terminal(work):
                  "Try: TERM=xterm-256color runnerdeck")
 
 
-def screen(*args, **kept):
-    terminal(lambda console: show(console, *args, **kept))
+def screen(cfg, runners, queue, here, pcs, intro=True, health=None):
+    def work(console):
+        colours()
+        if intro:
+            opening(console, facts(cfg, runners, pcs))
+        show(console, cfg, runners, queue, here, pcs, health)
+    terminal(work)
 
 
 def first_start():
@@ -471,4 +477,5 @@ def main(args=None):
     if any(runner.running() for runner in runners):
         keep_watch(cfg)
     here, pcs = build_machines(cfg)
-    screen(cfg, runners, Queue(cfg), here, pcs, health=Health(cfg) if cfg.health else None)
+    screen(cfg, runners, Queue(cfg), here, pcs, "--no-intro" not in args and not os.environ.get("RUNNERDECK_NO_INTRO"),
+           Health(cfg) if cfg.health else None)

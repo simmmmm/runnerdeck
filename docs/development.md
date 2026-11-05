@@ -31,6 +31,7 @@ python3 runnerdeck.pyz
 | `runnerdeck/machines.py` | CPU, GPU, memory, and temperature. |
 | `runnerdeck/terminal.py` | Keys and drawing. |
 | `runnerdeck/boxes.py` | The boxes of the screen. |
+| `runnerdeck/intro.py` | The logo and the opening. |
 | `runnerdeck/setup.py` | The questions of the first start. |
 | `runnerdeck/app.py` | The loop and the commands. |
 

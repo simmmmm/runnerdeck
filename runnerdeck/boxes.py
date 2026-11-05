@@ -401,7 +401,7 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
     GitHub's last runs and a log, the log taking what is left and GitHub
     giving way first."""
     width, height = canvas.width, canvas.height
-    canvas.put(0, 1, "◐ runnerdeck", "strong")
+    canvas.put(0, 1, "◐ runnerdeck", "logo")
     awake = "awake" if alive(cfg.awake) else "may sleep"
     told = " · notifying" if alive(cfg.watch) else ""
     if runners:

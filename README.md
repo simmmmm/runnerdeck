@@ -46,6 +46,14 @@ The first time, the program asks a few questions. It writes the config file for 
 
 To ask the questions again, use `--setup`. The config file is plain text. It lists all the options at its foot, as comments. Read it with `cat ~/.config/runnerdeck/config.ini`, or find it in your file manager. See also [Config](docs/config.md). To see the screen one time, as text, and start nothing, use `--status`.
 
+## The look
+
+The screen is neon green and cyan on a dark ground. Amber means warm. Red means wrong. The colour is never the only sign: the numbers, the marks, and the words are there too.
+
+- When you start the program, a short opening shows the logo. It takes about one second. Press any key to skip it. To turn it off, use `--no-intro` or set `RUNNERDECK_NO_INTRO=1`. `--status` has no opening.
+- A terminal with 8 colours (the Linux console, for example) gets 8 colours. With `NO_COLOR` set, or in a terminal that says it has no colours, the screen uses bold, dim, and reverse only.
+- The screen needs 80 columns. The opening needs 44 columns and 11 rows. On a smaller terminal it does not show.
+
 ## Example
 
 Three runners on this machine, and a second machine over SSH:

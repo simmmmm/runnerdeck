@@ -1750,6 +1750,69 @@ try:
 finally:
     healthmod.shutil.which, healthmod.subprocess.run = _shutil_which, _hrun
 
+# the look: colours by what the terminal has, and the opening
+from runnerdeck import intro
+assert terminal.depth({"TERM": "xterm-256color"}) == 256 and terminal.depth({"TERM": "linux"}) == 8
+assert terminal.depth({"TERM": "xterm-256color", "NO_COLOR": "1"}) == 0 and terminal.depth({"TERM": "dumb"}) == 0
+names = {}
+for tier in ({"TERM": "xterm-256color"}, {"TERM": "linux"}, {"NO_COLOR": "1"}):
+    terminal.colours(tier)
+    names[terminal.depth(tier)] = set(terminal.STYLE)
+    # Where there is no colour, nothing may ask for one; and an empty meter cell is a dot there, not a dim block.
+    if terminal.depth(tier) == 0:
+        assert not any("38;" in v or "48;" in v or v in ("32", "33", "36") for v in terminal.STYLE.values()), terminal.STYLE
+    assert terminal.EMPTY[0] == ("█" if terminal.depth(tier) == 256 else "·")
+assert names[256] == names[8] == names[0], names
+terminal.colours({"TERM": "xterm-256color"})
+screen_80 = terminal.Screen(types.SimpleNamespace(size=lambda: (30, 80)))
+boxes.paint(screen_80, two, [], nothing, None, 0, "", pcs=[])
+assert all(style in terminal.STYLE for row in screen_80.rows for _, style in row), "a style the palette lacks"
+terminal.STYLE.clear()
+terminal.EMPTY[0] = "·"
+
+grid = terminal.Grid(11, 80)
+intro.paint(grid, intro.STEPS + intro.HOLD, "2 repositories")
+assert all(line in grid.text() for line in intro.LOGO) and "runners · machines · runs" in grid.text() and "100%" in grid.text() and "2 repositories" in grid.text()
+early = terminal.Grid(11, 80)
+intro.paint(early, 2)
+assert intro.LOGO[0] not in early.text() and "100%" not in early.text()
+assert max(len(line) for line in intro.LOGO) <= 40, "the logo must fit in 80 columns with room"
+assert intro.facts(types.SimpleNamespace(repos=["a/b"]), [], []) == "1 repository"
+assert intro.facts(types.SimpleNamespace(repos=["a/b", "c/d"]), [1, 2], [3]) == "2 repositories · 2 runners · 1 other computer"
+
+
+class Window:
+    """A terminal that answers with these keys, one per frame, and counts the frames."""
+    def __init__(self, keys, shape=(30, 100)):
+        self.keys, self.shape, self.frames = list(keys), shape, 0
+
+    def size(self):
+        return self.shape
+
+    def key(self, wait=1.0):
+        self.frames += 1
+        return self.keys.pop(0) if self.keys else -1
+
+
+real_flush = terminal.Screen.flush
+terminal.Screen.flush = lambda self: None
+try:
+    full, skipped, small = Window([]), Window([-1, ord(" ")]), Window([], (10, 100))
+    intro.play(full)
+    intro.play(skipped)
+    intro.play(small)
+    intro.play(Window([], (30, 40)))
+finally:
+    terminal.Screen.flush = real_flush
+assert full.frames == intro.STEPS + intro.HOLD and skipped.frames == 2 and small.frames == 0, (full.frames, skipped.frames, small.frames)
+# --status is text for a person or a script: no opening in it
+with tempfile.TemporaryDirectory() as tmp:
+    with open(os.path.join(tmp, "c.ini"), "w") as file:
+        file.write("[deck]\nrepos = a/b\n")
+    got = subprocess.run([sys.executable, "-m", "runnerdeck", "--status"], env=dict(os.environ, RUNNERDECK_CONFIG=os.path.join(tmp, "c.ini"), PYTHONPATH=ROOT),
+                         capture_output=True, text=True, timeout=60)
+    assert "◐ runnerdeck" in got.stdout and intro.LOGO[0] not in got.stdout and "\x1b" not in got.stdout, got.stdout
+
 import shutil as _shutil
 _shutil.rmtree(os.environ["RUNNERDECK_DATA"], ignore_errors=True)
 print("ok")
