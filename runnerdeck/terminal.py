@@ -1,5 +1,6 @@
 """The terminal: keys and size, how a frame is painted, and the pieces boxes are made of."""
 import ctypes
+import os
 import shutil
 import sys
 import time
@@ -23,6 +24,12 @@ ENTER = (10, 13, K_ENTER)
 # The screen's colours by name, filled in by `colours` under curses; the
 # text of --status has none, and draws an empty meter cell as a dot.
 STYLE = {}
+
+
+# What an empty meter cell is drawn as: a dim block where the terminal has
+# colours; a dot in --status's text and where it has none, as a dim block is
+# as bright as a full one there.
+EMPTY = ["·"]
 
 
 BLOCKS = "▁▂▃▄▅▆▇█"
@@ -165,28 +172,55 @@ class Screen:
         sys.stdout.buffer.flush()
 
 
-def colours():
-    """btop's way of looking: grey frames and labels, white for what matters,
-    green to amber to red for how much; SGR's numbers, of 256 colours."""
-    STYLE.update({
-        "frame": "38;5;240",
-        "label": "38;5;246",
-        "plain": "38;5;252",
-        "dim": "38;5;243",
-        "strong": "1;38;5;255",
-        "good": "38;5;114",
-        "warm": "38;5;179",
-        "bad": "1;38;5;167",
-        "empty": "1;38;5;237",
-        "picked": "7",
-        # What a popup lies over, and the popup: a ground of its own.
-        "under": "38;5;238",
-        "pop": "38;5;252;48;5;236",
-        "pop-strong": "1;38;5;255;48;5;236",
-        "pop-frame": "38;5;250;48;5;236",
-        "pop-off": "38;5;252;48;5;239",
-        "pop-on": "1;38;5;234;48;5;255",
-    })
+def depth(env=None):
+    """How many colours the terminal has, as far as it says: 0 for none (NO_COLOR, a dumb
+    terminal), 8 for the old ones (the Linux console, plain xterm), 256 for the rest."""
+    env = os.environ if env is None else env
+    term = env.get("TERM", "")
+    if env.get("NO_COLOR") or term in ("dumb", "vt100"):
+        return 0
+    if WINDOWS or "256" in term or env.get("COLORTERM") in ("truecolor", "24bit") or term in ("", "alacritty", "kitty", "foot", "wezterm"):
+        return 256
+    return 8
+
+
+def colours(env=None):
+    """Neon on dark: green and cyan on a near-black ground, amber and red for what is
+    warm and what is wrong. SGR's numbers; the ground is the screen's own, so that the
+    look does not depend on the terminal's theme. Where the terminal has 8 colours the
+    same names get the 8, and with none, bold and dim and reverse only. What is said is
+    never in the colour alone: the numbers, the marks and the words are there too."""
+    levels = depth(env)
+    if levels == 256:
+        ground = ";48;5;233"
+        STYLE.update({
+            "frame": "38;5;30", "edge": "1;38;5;51", "label": "38;5;73", "plain": "38;5;253",
+            "dim": "38;5;66", "strong": "1;38;5;51", "good": "38;5;47", "warm": "38;5;214",
+            "bad": "1;38;5;203", "empty": "38;5;23", "picked": "7", "logo": "1;38;5;51", "glitch": "38;5;41",
+            # What a popup lies over, and the popup: a ground of its own.
+            "under": "38;5;23", "pop": "38;5;253;48;5;17", "pop-strong": "1;38;5;51;48;5;17",
+            "pop-frame": "38;5;45;48;5;17", "pop-off": "38;5;253;48;5;24", "pop-on": "1;38;5;16;48;5;51",
+        })
+        for name in STYLE:
+            if name != "picked" and "48;" not in STYLE[name]:
+                STYLE[name] += ground
+        STYLE["picked"] = "7;48;5;233"
+        STYLE[""] = "38;5;253" + ground
+        EMPTY[0] = "█"
+    elif levels == 8:
+        STYLE.update({
+            "frame": "36", "edge": "1;36", "label": "36", "plain": "37", "dim": "2;37", "strong": "1;36",
+            "good": "32", "warm": "33", "bad": "1;31", "empty": "2;36", "picked": "7", "logo": "1;36", "glitch": "32",
+            "under": "2;36", "pop": "37;44", "pop-strong": "1;37;44", "pop-frame": "36;44", "pop-off": "37;44", "pop-on": "30;46",
+        })
+        STYLE[""] = ""
+        EMPTY[0] = "·"
+    else:
+        STYLE.update({name: "" for name in ("frame", "label", "plain", "good", "warm", "empty", "glitch", "pop", "pop-frame")})
+        STYLE.update({"edge": "1", "strong": "1", "logo": "1", "bad": "1", "dim": "2", "under": "2", "picked": "7",
+                      "pop-strong": "1", "pop-off": "", "pop-on": "7"})
+        STYLE[""] = ""
+        EMPTY[0] = "·"
 
 
 def heat(share):
@@ -195,7 +229,8 @@ def heat(share):
 
 def frame(canvas, y, x, height, width, title, right=""):
     """A box with rounded corners, its title in the top edge, as btop's."""
-    canvas.put(y, x, "╭─", "frame")
+    canvas.put(y, x, "╭", "edge")
+    canvas.put(y, x + 1, "─", "frame")
     canvas.put(y, x + 2, f" {title} ", "strong")
     start = x + 4 + len(title)
     end = x + width - 1 - (len(right) + 3 if right else 0)
@@ -203,11 +238,13 @@ def frame(canvas, y, x, height, width, title, right=""):
     if right:
         canvas.put(y, end, f" {right} ", "label")
         canvas.put(y, x + width - 2, "─", "frame")
-    canvas.put(y, x + width - 1, "╮", "frame")
+    canvas.put(y, x + width - 1, "╮", "edge")
     for row in range(y + 1, y + height - 1):
         canvas.put(row, x, "│", "frame")
         canvas.put(row, x + width - 1, "│", "frame")
     canvas.put(y + height - 1, x, "╰" + "─" * max(0, width - 2) + "╯", "frame")
+    canvas.put(y + height - 1, x, "╰", "edge")
+    canvas.put(y + height - 1, x + width - 1, "╯", "edge")
 
 
 def meter(canvas, y, x, width, share, style=None):
@@ -218,7 +255,7 @@ def meter(canvas, y, x, width, share, style=None):
         if at < filled:
             canvas.put(y, x + at, "█", style or heat(at / max(width - 1, 1)))
         else:
-            canvas.put(y, x + at, "█" if STYLE else "·", "empty")
+            canvas.put(y, x + at, EMPTY[0], "empty")
 
 
 def spark(canvas, y, x, width, history):
