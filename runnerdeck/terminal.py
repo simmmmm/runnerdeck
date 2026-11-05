@@ -30,6 +30,7 @@ STYLE = {}
 # colours; a dot in --status's text and where it has none, as a dim block is
 # as bright as a full one there.
 EMPTY = ["·"]
+FULL = ["█"]
 
 
 BLOCKS = "▁▂▃▄▅▆▇█"
@@ -194,7 +195,7 @@ def colours(env=None):
     if levels == 256:
         ground = ";48;5;233"
         STYLE.update({
-            "frame": "38;5;30", "edge": "1;38;5;51", "label": "38;5;73", "plain": "38;5;253",
+            "frame": "38;5;30", "cool": "38;5;45", "edge": "1;38;5;51", "label": "38;5;73", "plain": "38;5;253",
             "dim": "38;5;66", "strong": "1;38;5;51", "good": "38;5;47", "warm": "38;5;214",
             "bad": "1;38;5;203", "empty": "38;5;23", "picked": "7", "logo": "1;38;5;51", "glitch": "38;5;41",
             # What a popup lies over, and the popup: a ground of its own.
@@ -206,25 +207,25 @@ def colours(env=None):
                 STYLE[name] += ground
         STYLE["picked"] = "7;48;5;233"
         STYLE[""] = "38;5;253" + ground
-        EMPTY[0] = "█"
+        EMPTY[0], FULL[0] = ("■", "·") if WINDOWS else ("▱", "▰")
     elif levels == 8:
         STYLE.update({
-            "frame": "36", "edge": "1;36", "label": "36", "plain": "37", "dim": "2;37", "strong": "1;36",
+            "frame": "36", "cool": "1;36", "edge": "1;36", "label": "36", "plain": "37", "dim": "2;37", "strong": "1;36",
             "good": "32", "warm": "33", "bad": "1;31", "empty": "2;36", "picked": "7", "logo": "1;36", "glitch": "32",
             "under": "2;36", "pop": "37;44", "pop-strong": "1;37;44", "pop-frame": "36;44", "pop-off": "37;44", "pop-on": "30;46",
         })
         STYLE[""] = ""
-        EMPTY[0] = "·"
+        EMPTY[0], FULL[0] = ("■", "·") if WINDOWS else ("▱", "▰")
     else:
-        STYLE.update({name: "" for name in ("frame", "label", "plain", "good", "warm", "empty", "glitch", "pop", "pop-frame")})
+        STYLE.update({name: "" for name in ("frame", "label", "plain", "good", "warm", "empty", "glitch", "cool", "pop", "pop-frame")})
         STYLE.update({"edge": "1", "strong": "1", "logo": "1", "bad": "1", "dim": "2", "under": "2", "picked": "7",
                       "pop-strong": "1", "pop-off": "", "pop-on": "7"})
         STYLE[""] = ""
-        EMPTY[0] = "·"
+        EMPTY[0], FULL[0] = "·", "█"
 
 
 def heat(share):
-    return "good" if share < 0.6 else "warm" if share < 0.85 else "bad"
+    return "cool" if share < 0.3 else "good" if share < 0.6 else "warm" if share < 0.85 else "bad"
 
 
 def frame(canvas, y, x, height, width, title, right=""):
@@ -243,6 +244,9 @@ def frame(canvas, y, x, height, width, title, right=""):
         canvas.put(row, x, "│", "frame")
         canvas.put(row, x + width - 1, "│", "frame")
     canvas.put(y + height - 1, x, "╰" + "─" * max(0, width - 2) + "╯", "frame")
+    # Ticks on the foot, like a ruler.
+    for tick in range(x + 10, x + width - 3, 10):
+        canvas.put(y + height - 1, tick, "┴", "frame")
     canvas.put(y + height - 1, x, "╰", "edge")
     canvas.put(y + height - 1, x + width - 1, "╯", "edge")
 
@@ -253,7 +257,7 @@ def meter(canvas, y, x, width, share, style=None):
     filled = round(max(0.0, min(1.0, share)) * width)
     for at in range(max(0, width)):
         if at < filled:
-            canvas.put(y, x + at, "█", style or heat(at / max(width - 1, 1)))
+            canvas.put(y, x + at, FULL[0], style or heat(at / max(width - 1, 1)))
         else:
             canvas.put(y, x + at, EMPTY[0], "empty")
 
@@ -263,7 +267,7 @@ def spark(canvas, y, x, width, history):
     coloured by its height."""
     width = max(0, width)
     values = list(history)[-width:] if width else []
-    canvas.put(y, x, "▁" * (width - len(values)), "empty")
+    canvas.put(y, x, "·" * (width - len(values)), "empty")
     for at, value in enumerate(values):
         level = min(len(BLOCKS) - 1, int(value / 100 * len(BLOCKS)))
         canvas.put(y, x + width - len(values) + at, BLOCKS[level], heat(value / 100))

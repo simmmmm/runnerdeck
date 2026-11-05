@@ -1761,14 +1761,14 @@ for tier in ({"TERM": "xterm-256color"}, {"TERM": "linux"}, {"NO_COLOR": "1"}):
     # Where there is no colour, nothing may ask for one; and an empty meter cell is a dot there, not a dim block.
     if terminal.depth(tier) == 0:
         assert not any("38;" in v or "48;" in v or v in ("32", "33", "36") for v in terminal.STYLE.values()), terminal.STYLE
-    assert terminal.EMPTY[0] == ("█" if terminal.depth(tier) == 256 else "·")
+    assert (terminal.FULL[0], terminal.EMPTY[0]) == ((("■", "·") if terminal.WINDOWS else ("▰", "▱")) if terminal.depth(tier) else ("█", "·"))
 assert names[256] == names[8] == names[0], names
 terminal.colours({"TERM": "xterm-256color"})
 screen_80 = terminal.Screen(types.SimpleNamespace(size=lambda: (30, 80)))
 boxes.paint(screen_80, two, [], nothing, None, 0, "", pcs=[])
 assert all(style in terminal.STYLE for row in screen_80.rows for _, style in row), "a style the palette lacks"
 terminal.STYLE.clear()
-terminal.EMPTY[0] = "·"
+terminal.EMPTY[0], terminal.FULL[0] = "·", "█"
 
 grid = terminal.Grid(11, 80)
 intro.paint(grid, intro.STEPS + intro.HOLD, "2 repositories")

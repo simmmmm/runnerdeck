@@ -402,6 +402,7 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
     giving way first."""
     width, height = canvas.width, canvas.height
     canvas.put(0, 1, "◐ runnerdeck", "logo")
+    canvas.put(0, 14, "▓▒░", "glitch")
     awake = "awake" if alive(cfg.awake) else "may sleep"
     told = " · notifying" if alive(cfg.watch) else ""
     if runners:
