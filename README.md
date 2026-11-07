@@ -93,6 +93,8 @@ service = actions-runner.service
 | `←` `→` or `Tab` | Switch to the log of another runner. All runners are tabs above the log. |
 | `↑` `↓` | Choose a run. |
 | `c` `r` `o` | Cancel, repeat, or open the chosen run. `o` opens a chosen issue of the health box too. |
+| `←` `→` or `↑` `↓` in a question | Choose the answer. Enter gives it. |
+| `←` `→`, `Home`, `End` in a text field | Move the cursor. What you type goes there. A list of repositories is not cleared when you type: what you type goes where the cursor is. |
 
 ## More
 

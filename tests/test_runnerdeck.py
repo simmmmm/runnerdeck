@@ -523,6 +523,29 @@ with tempfile.TemporaryDirectory() as tmp:
     now_cfg = configmod.load(repo_file)
     w = setupmod.Wizard.for_repos(now_cfg, Checks(seen={"x/y": False}), path=repo_file, threaded=False)
     assert w.step == "repos" and w.mode == "repos" and w.field == "a/b"          # what is watched is there to edit
+    for key in ", x/y":
+        w.feed(ord(key))
+    assert w.field == "a/b, x/y"                                                  # typed after the list, not over it
+    # a cursor: ←→ Home End move it, what is typed goes in there, Backspace and Delete take out around it
+    w.feed(terminal.K_HOME)
+    for key in "z/z, ":
+        w.feed(ord(key))
+    assert w.field == "z/z, a/b, x/y" and w.at == 5
+    for _ in range(3):
+        w.feed(terminal.K_RIGHT)
+    w.feed(terminal.K_DELETE)
+    w.feed(terminal.K_DELETE)
+    assert w.field == "z/z, a/bx/y" and w.at == 8, (w.field, w.at)
+    w.feed(terminal.K_BACKSPACE)
+    assert w.field == "z/z, a/x/y" and w.at == 7, (w.field, w.at)
+    w.feed(terminal.K_END)
+    w.feed(terminal.K_RIGHT)
+    assert w.at == len(w.field)
+    assert setupmod.caret("abcdef", 2, 4) == "ab▏c" and setupmod.caret("abcdef", 6, 4) == "def▏"
+    w.feed(terminal.K_HOME)
+    w.feed(terminal.K_LEFT)
+    assert w.at == 0
+    w.feed(terminal.K_END)
     answer(w, "a/b, x/y")
     assert w.step == "repos" and w.bad and "cannot see x/y" in w.note
     answer(w, "")
@@ -911,7 +934,7 @@ if not system.WINDOWS:
         send("\x1b", "no runs")                            # esc closes it
         send("m", "Settings")
         send("2", "Which repositories do you watch")       # a number chooses: the repositories, as they are now
-        send("owner/name, o/other\r", "Saved.")
+        send(", o/other\r", "Saved.")                       # typed after the list: one more is added
         send("\r", "no runs")
         send("h", "SSH address")
         send("me@192.168.2.15\r", "Linux or macOS")        # tried at once, then what kind of computer it is

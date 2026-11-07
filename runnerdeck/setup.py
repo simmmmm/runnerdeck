@@ -13,7 +13,7 @@ import time
 from .config import ConfigError, FOLDER, HOST, REFERENCE, SLUG, WORD, configure, default_path, set_approval, set_host, set_section
 from .machines import explain_ssh
 from .runners import Runner, TOKEN, find_runners, gh_token, plan_of, set_up
-from .terminal import K_BACKSPACE, K_DOWN, K_RESIZE, K_UP, Screen, colours, frame
+from .terminal import K_BACKSPACE, K_DELETE, K_DOWN, K_END, K_HOME, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, frame
 
 # Each step: its kind (info, text or yesno) and the title on the right of its frame.
 STEPS = {
@@ -182,8 +182,10 @@ class Wizard:
     # ---- moving between steps
     def enter(self):
         self.field = self.typed.get(self.step) or self.default(self.step)
-        # What is offered is replaced by the first key typed; backspace edits it.
-        self.fresh = bool(self.field)
+        # What is offered is replaced by the first key typed; backspace edits it. The repositories that are
+        # watched are not an offer but the list itself: what is typed goes after them, to add one.
+        self.fresh = bool(self.field) and not (self.mode == "repos" and self.step == "repos")
+        self.at = len(self.field)   # where the cursor is: what is typed goes there
         self.note, self.bad, self.kept, self.kept_parsed = "", False, False, None
         if self.step == "welcome":
             def looked(result):
@@ -346,12 +348,21 @@ class Wizard:
         else:
             if key in (10, 13, 343):
                 self.submit()
-            elif key in (8, 127, K_BACKSPACE):
-                self.field, self.kept, self.fresh = self.field[:-1], False, False
+            elif key in (K_LEFT, K_RIGHT, K_HOME, K_END):
+                # Moving in what is offered is to edit it: the next key no longer replaces it.
+                self.at = {K_LEFT: self.at - 1, K_RIGHT: self.at + 1, K_HOME: 0, K_END: len(self.field)}[key]
+                self.at, self.fresh = max(0, min(len(self.field), self.at)), False
+            elif key in (8, 127, K_BACKSPACE, K_DELETE):
+                cut = self.at - 1 if key != K_DELETE else self.at
+                if 0 <= cut < len(self.field):
+                    self.field, self.at = self.field[:cut] + self.field[cut + 1:], cut
+                self.kept, self.fresh = False, False
                 self.note, self.bad = "", False       # what was said was of what stood there before
             elif 32 <= key < 127:
-                self.field, self.kept = ("" if self.fresh else self.field) + chr(key), False
-                self.fresh = False
+                if self.fresh:
+                    self.field, self.at = "", 0
+                self.field = self.field[:self.at] + chr(key) + self.field[self.at:]
+                self.at, self.kept, self.fresh = self.at + 1, False, False
                 self.note, self.bad = "", False
 
     def submit(self):
@@ -660,8 +671,14 @@ class Wizard:
         if busy:
             hint = "esc: stop waiting"
         return {"title": title, "lines": [] if self.hide else self.text(),
-                "field": self.field if kind == "text" and not self.hide else None, "busy": busy,
+                "field": self.field if kind == "text" and not self.hide else None, "at": self.at, "busy": busy,
                 "secret": self.step == "token", "fresh": self.fresh, "hint": hint, "note": self.note, "bad": self.bad}
+
+
+def caret(text, at, room):
+    """The text with the cursor (▏) at `at`, cut to `room` columns around the cursor."""
+    start = max(0, at - room + 1)
+    return (text[:at] + "▏" + text[at:])[start:start + room]
 
 
 def draw(canvas, view):
@@ -674,7 +691,7 @@ def draw(canvas, view):
         rows += [(style, piece) for piece in (textwrap.wrap(text, inner) or [""])]
     if view["field"] is not None:
         shown = ("●" * len(view["field"])) if view["secret"] else view["field"]
-        rows += [("plain", ""), ("dim" if view["fresh"] else "strong", "› " + shown[-(inner - 4):] + "▏")]
+        rows += [("plain", ""), ("dim" if view["fresh"] else "strong", "› " + caret(shown, view.get("at", len(shown)), inner - 3))]
     if view["busy"]:
         rows += [("plain", ""), ("warm", view["busy"])]
     if view["note"]:
