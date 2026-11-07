@@ -30,7 +30,7 @@
  ↑↓ choose   m settings   s start   x stop   1-4 pages   q quit, runners stay on
 ```
 
-*Example of the first page, as `--status` prints it. The numbers are made up. On the terminal the screen is black, grey and orange.*
+*Example of the first page, drawn as text. The numbers are made up. On the terminal the screen is black, grey and orange, and the numbers are big; `--status` prints them in one row.*
 
 ## What it does
 
