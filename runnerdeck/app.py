@@ -13,14 +13,14 @@ from .util import read
 from .system import WINDOWS
 from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, runner_rows, set_computer, set_section
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
-from .health import Health, open_issue
+from .health import ISSUE_ROW, Health, open_issue
 from .github import Queue, act_on_run, approve, close, failed_log, row_of
 from .update import behind, remember, update
 from .machines import Pc, RemoteMac, build_machines, probe
-from .terminal import MOTION, ConsoleTerminal, CursesTerminal, ENTER, Grid, depth, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, curses
+from .terminal import MOTION, ConsoleTerminal, CursesTerminal, ENTER, Grid, depth, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, animating, colours, curses, start
 from .boxes import moving, paint, with_remote
 from .builds import run_recorded
-from .intro import facts, play as opening
+from .intro import facts, play as opening, wipe
 from .setup import Wizard, menu, run as run_setup, show_text
 
 
@@ -35,6 +35,8 @@ def show(window, cfg, runners, queue, machine, pcs=(), health=None):
     threading.Thread(target=watch_for_update, daemon=True).start()
     # By its row, not its place: the list moves as runs come in.
     shown, note, picked, dialog = 0, "", None, None
+    page = 1
+    start("page", 0.8)
 
     leaving = False
 
@@ -198,10 +200,11 @@ def show(window, cfg, runners, queue, machine, pcs=(), health=None):
         if queue.said:
             note, queue.said = queue.said, ""
         screen = Screen(window)
-        paint(screen, cfg, runners, queue, machine, shown, note, picked, dialog, pcs, health)
+        paint(screen, cfg, runners, queue, machine, shown, note, picked, dialog, pcs, health, page)
         screen.flush()
         # Four times a second while something moves (a spinner, a busy job), else once: the PC has other work.
-        key = window.key(0.25 if MOTION[0] and moving(runners, queue, pcs) else 1.0)
+        # Quickly while a page or a question comes in.
+        key = window.key(0.03 if animating() else 0.25 if MOTION[0] and moving(runners, queue, pcs) else 1.0)
         if key == -1:
             continue
         if key == K_RESIZE:
@@ -232,6 +235,7 @@ def show(window, cfg, runners, queue, machine, pcs=(), health=None):
                 dialog["then"]()
                 dialog = None
                 if leaving:
+                    wipe(window)
                     return
             elif key in (ord("n"), ord("q"), 27) or key in ENTER:
                 dialog = None
@@ -244,8 +248,16 @@ def show(window, cfg, runners, queue, machine, pcs=(), health=None):
             dialog = ask("Leave", "Leave runnerdeck? The runners keep running.", "Leave", "Stay", leave)
             dialog["quit"] = True
             continue
+        if ord("1") <= key <= ord("4"):
+            page, note = key - ord("0"), ""
+            start("page", 0.5)
+            # What is chosen stays only where it can be seen: a run on DECK and RUNS, a request or an issue on DECK.
+            if picked is not None and (page in (3, 4) or (page == 2 and (picked < 0 or picked >= ISSUE_ROW))):
+                picked = None
+            continue
         requests, runs = queue.requests, queue.runs or []
-        items = [*requests, *(health.issues if health else []), *runs]
+        # ↑↓ choose only what the page shows: so that c never cancels a run that is not on the screen.
+        items = [*requests, *(health.issues if health else []), *runs] if page == 1 else runs if page == 2 else []
         if key in (K_UP, K_DOWN) and items:
             rows = [row_of(item) for item in items]
             step = 1 if key == K_DOWN else -1

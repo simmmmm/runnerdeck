@@ -186,7 +186,8 @@ else:
         out = subprocess.run([sys.executable, "-m", "runnerdeck", "--status"], env=env, cwd=ROOT,
                              capture_output=True, text=True, timeout=60)
         assert out.returncode == 0, out.stderr
-        assert "workstation" in out.stdout and "box" in out.stdout and "◐ runnerdeck" in out.stdout, out.stdout
+        # The computer answered over the stand-in ssh: it has a line of its own among the machines.
+        assert "RUNNERDECK" in out.stdout and re.search(r"workstation +\S+ +\d+%", out.stdout), out.stdout
         # No config: it says what to do, and does not draw.
         env["RUNNERDECK_CONFIG"] = os.path.join(tmp, "none.ini")
         out = subprocess.run([sys.executable, "-m", "runnerdeck", "--status"], env=env, cwd=ROOT, capture_output=True, text=True)
@@ -832,14 +833,23 @@ if not system.WINDOWS:
         send("\r", "Setup is done")
         send("\r", "gh did not answer")        # the main screen, saying why there are no runs
         os.write(fd, b"qq")
-        _, status = os.waitpid(pid, 0)
+        # Read on while it leaves, as a terminal does: the wipe it leaves with is more than a pty holds.
+        done = (0, 0)
+        while not done[0]:
+            if select.select([fd], [], [], 0.2)[0]:
+                try:
+                    os.read(fd, 65536)
+                except OSError:
+                    pass
+            done = os.waitpid(pid, os.WNOHANG)
+        status = done[1]
         assert os.WEXITSTATUS(status) == 0, status
         assert active(open(os.path.join(tmp, "c", "config.ini")).read()) == "[deck]\nrepos = owner/name\n"
         assert os.path.getsize(os.path.join(tmp, "runnerdeck.pyz")) > 1000
         assert ".local/bin" in open(os.path.join(tmp, ".bashrc")).read() and os.access(os.path.join(tmp, ".local", "bin", "runnerdeck"), os.X_OK)
         # And the program started again finds its config and does not ask.
         out = subprocess.run([sys.executable, "-m", "runnerdeck", "--status"], env=env, cwd=tmp, capture_output=True, text=True, timeout=60)
-        assert out.returncode == 0 and "Welcome" not in out.stdout and "◐ runnerdeck" in out.stdout, out.stderr
+        assert out.returncode == 0 and "Welcome" not in out.stdout and " RUNNERDECK " in out.stdout, out.stderr
 
 # --- the command: what the installation wrote is said, and a second time it is not written again
 if not system.WINDOWS:
@@ -929,10 +939,11 @@ if not system.WINDOWS:
         send("\r", "Which label")
         send("\r", "Saved.")
         send("\r", "no runs")                              # back on the main screen
-        send("m", "Settings")                              # the menu: everything that can be changed
-        assert "Add a runner on this machine" in seen and "Remove a computer" in seen and "Where is the config file" in seen
+        send("m", "SETTINGS")                              # the menu: everything that can be changed
+        until("Where is the config file")                  # the bars slide in, the last one last
+        assert "Add a runner on this machine" in seen and "Remove a computer" in seen
         send("\x1b", "no runs")                            # esc closes it
-        send("m", "Settings")
+        send("m", "SETTINGS")
         send("2", "Which repositories do you watch")       # a number chooses: the repositories, as they are now
         send(", o/other\r", "Saved.")                       # typed after the list: one more is added
         send("\r", "no runs")
@@ -948,7 +959,11 @@ if not system.WINDOWS:
         send("\x1b", "no runs")                            # esc in the question stays
         send("\x1b", "Leave runnerdeck")
         os.write(fd, b"y")                                 # leave
-        _, status = os.waitpid(pid, 0)
+        done = (0, 0)
+        while not done[0]:                                 # reading on, as a terminal does, while the wipe goes over
+            pump(0.2)
+            done = os.waitpid(pid, os.WNOHANG)
+        status = done[1]
         assert os.WEXITSTATUS(status) == 0
         assert open(config_file).read() == ("# mine\n[deck]\nrepos = owner/name, o/other\n\n[approval]\nworkflows = CI, TestFlight\n"
                                             "label = testflight-request\n\n[host pc]\nssh = me@192.168.2.15\n"), open(config_file).read()
@@ -966,11 +981,16 @@ def footer_text(width, picking):
 
 for picking in ("run", "request", None):
     wide = footer_text(190, picking)
-    for key in ("q quit", "m settings", "s start", "x stop", "←→ logs"):
+    for key in ("q quit", "m settings", "s start", "x stop", "1-4 pages"):
         assert key in wide, (picking, key, wide)
     for key in ("n new runner", "w approval", "h add computer"):             # these are in the settings, not on the line
         assert key not in wide, (picking, key, wide)
 assert "runners stay on" in footer_text(190, None)
+# the keys follow the page: ↑↓ choose on DECK and RUNS, ←→ switch the log on LOGS, neither on MACHINES
+_logs, _machines = terminal.Grid(1, 190), terminal.Grid(1, 190)
+boxes.footer(_logs, 0, 190, "", None, 3)
+boxes.footer(_machines, 0, 190, "", None, 4)
+assert "←→ other log" in _logs.text() and "↑↓" not in _logs.text() and "↑↓" not in _machines.text() and "←→" not in _machines.text()
 assert "c cancel" in footer_text(190, "run") and "r run again" in footer_text(190, "run")        # what the chosen run can do
 assert "enter start" in footer_text(190, "request") and "d decline" in footer_text(190, "request")
 mid = footer_text(110, "run")                                                                  # a normal window: nothing needed is gone
@@ -987,9 +1007,9 @@ two = configured("[deck]\nrepos = o/alpha, o/beta\n")
 one = configured("[deck]\nrepos = o/alpha\n")
 
 
-def drawn(cfg_used, queue, pcs=(), width=110):
+def drawn(cfg_used, queue, pcs=(), width=110, page=1):
     grid = terminal.Grid(30, width)
-    boxes.paint(grid, cfg_used, [], queue, None, 0, "", pcs=list(pcs))
+    boxes.paint(grid, cfg_used, [], queue, None, 0, "", pcs=list(pcs), page=page)
     return grid.text()
 
 
@@ -1000,9 +1020,11 @@ fresh = types.SimpleNamespace(failed=False, reachable=lambda: False, **stub)
 up = types.SimpleNamespace(failed=False, reachable=lambda: True, **dict(stub, now={
     "cpu": 10.0, "gpu": None, "load": 1.0, "threads": 4.0, "memory": (1.0, 8.0), "runner": "active", "log": []}, cpu=[10.0]))
 text = drawn(two, nothing, [down])
-assert "pc not answering" in text.splitlines()[0] and "╭─ pc" not in text         # no box: a line in the head says which
-assert "not answering" not in drawn(two, nothing, [fresh]).splitlines()[0]        # not asked yet: nothing said, no box
-assert "╭─ pc" in drawn(two, nothing, [up]) and "not answering" not in drawn(two, nothing, [up])
+needs_line = next(line for line in text.splitlines() if "NEEDS_YOU" in line)
+assert "pc not answering" in needs_line and " pc " not in drawn(two, nothing, [down], page=4)   # no box: NEEDS_YOU says which
+assert "not answering" not in drawn(two, nothing, [fresh])                       # not asked yet: nothing said, no box
+assert re.search(r"pc +\S+ +10%", drawn(two, nothing, [up])) and "not answering" not in drawn(two, nothing, [up])  # a line on DECK
+assert " pc " in drawn(two, nothing, [up], page=4) and "1.0" in drawn(two, nothing, [up], page=4)      # and its box on MACHINES
 
 def a_run(repo, number):
     return {"repo": repo, "databaseId": number, "workflowName": "Build", "headBranch": "main", "headSha": "abcdef1234",
@@ -1134,8 +1156,8 @@ with tempfile.TemporaryDirectory() as data:
         shown = drawn(two, nothing, [pc_with], width=110)
     finally:
         os.environ["RUNNERDECK_DATA"] = saved
-    assert "built here" in shown and "builds · workshop" in shown and "built there" in shown, shown
-assert "builds" not in drawn(two, nothing, []).replace("builds ·", "x")           # nothing recorded: no box, nothing said
+    assert "built here" in shown and "BUILDS · workshop" in shown and "built there" in shown, shown
+assert "BUILDS" not in drawn(two, nothing, [])           # nothing recorded: no box, nothing said
 
 # --- the logs: every runner a tab on the top edge, the one shown on white, the others grey, a dot where a job runs
 class Recorder:
@@ -1200,7 +1222,7 @@ if not system.WINDOWS:
                 os.execvpe(sys.executable, [sys.executable, "-m", "runnerdeck"], env)
             fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
             seen, end = "", time.time() + 6
-            while time.time() < end and "◐ runnerdeck" not in seen and "Error" not in seen:
+            while time.time() < end and " RUNNERDECK " not in seen and "Error" not in seen:
                 ready, _, _ = select.select([fd], [], [], 0.1)
                 if ready:
                     try:
@@ -1219,7 +1241,7 @@ if not system.WINDOWS:
                          {"TERM": "", "LANG": "C.UTF-8"}, {"TERM": "xterm-256color", "LC_ALL": "zz_ZZ.UTF-8"},
                          {"TERM": "no-such-terminal-xyz", "LC_ALL": "zz_ZZ.UTF-8", "LANG": "zz_ZZ.UTF-8"}):
             shown = screen_with(settings)
-            assert "◐ runnerdeck" in shown and "Traceback" not in shown, (settings, shown[-300:])
+            assert " RUNNERDECK " in shown and "Traceback" not in shown, (settings, shown[-300:])
         code, said = screen_with({"TERM": "xterm-256color"}, tty=False)               # ssh without -t: no terminal at all
         assert code != 0 and "needs a terminal" in said and "ssh -t" in said and "Traceback" not in said, (code, said)
 
@@ -1344,11 +1366,13 @@ def remote_mac(reachable=True):
     return mac
 
 
-shown = drawn(two, nothing, [remote_mac()], width=110)
-assert "╭─ macbook" in shown and "macbook · load 3.2 · 11 cores" in shown and "Nominal" in shown and "on battery" in shown, shown
-assert "runners · macbook" in shown and "1 of 2 busy" in shown and "Running build" in shown and "last check succeeded" in shown, shown
+shown = drawn(two, nothing, [remote_mac()], width=110, page=4)                  # its box on MACHINES
+assert " macbook " in shown and "macbook · load 3.2 · 11 cores" in shown and "Nominal" in shown and "on battery" in shown, shown
+shown = drawn(two, nothing, [remote_mac()], width=110)                          # its runners on DECK, with the computer's name
+assert re.search(r"mac +macbook +Running build", shown) and "1 of 2 busy" in shown and "last check succeeded" in shown, shown
 gone = drawn(two, nothing, [remote_mac(reachable=False)], width=110)
-assert "macbook not answering" in gone.splitlines()[0] and "╭─ macbook" not in gone and "runners · macbook" not in gone
+assert "macbook not answering" in next(line for line in gone.splitlines() if "NEEDS_YOU" in line), gone
+assert " macbook " not in drawn(two, nothing, [remote_mac(reachable=False)], width=110, page=4) and "mac-2" not in gone
 
 # --- which Rust toolchain a build used: read from rustup's own files, never by asking rustup (it would download)
 with tempfile.TemporaryDirectory() as tmp:
@@ -1791,6 +1815,21 @@ terminal.colours({"TERM": "xterm-256color"})
 screen_80 = terminal.Screen(types.SimpleNamespace(size=lambda: (30, 80)))
 boxes.paint(screen_80, two, [], nothing, None, 0, "", pcs=[])
 assert all(style in terminal.STYLE for row in screen_80.rows for _, style in row), "a style the palette lacks"
+# every page, and a question over it, in every tier of colour: no style that the palette lacks
+_going = dict(a_run("o/alpha", 7), status="in_progress", conclusion="")
+_busy = types.SimpleNamespace(runs=[_going, a_run("o/alpha", 8)], requests=[asked_one], problem="", jobs={}, working={}, said="")
+_ask = {"title": "Cancel", "words": "Cancel Build main abcdef1?", "yes": "Cancel it", "no": "Let it run", "focus": False}
+for _tier in ({"TERM": "xterm-256color"}, {"TERM": "linux"}, {"NO_COLOR": "1"}):
+    terminal.colours(_tier)
+    for _page in (1, 2, 3, 4):
+        for _size in ((30, 110), (24, 80)):
+            _s = terminal.Screen(types.SimpleNamespace(size=lambda _size=_size: _size))
+            boxes.paint(_s, two, [], _busy, None, 0, "", picked=7, dialog=_ask if _page == 1 else None, pcs=[up], page=_page)
+            _missing = {style for row in _s.rows for _, style in row if style not in terminal.STYLE}
+            assert not _missing, (_tier, _page, _size, _missing)
+            assert all(len(row) == _size[1] for row in _s.rows)
+    terminal.STYLE.clear()
+terminal.colours({"TERM": "xterm-256color"})
 terminal.STYLE.clear()
 terminal.GLYPH.update({"full": "█", "empty": "·", "spin": "", "braille": False})
 
@@ -1830,12 +1869,12 @@ class Recorder(terminal.Grid):
 _r = Recorder(10, 100)
 boxes.github_box(_r, 0, 100, [{"databaseId": 1, "workflowName": "CI", "headBranch": "main", "headSha": "abc1234", "status": "completed",
                                "conclusion": "failure", "repo": "a/b", "createdAt": "2026-10-31T16:00:00Z"}], ["a/b"], age=200)
-assert ("title-bad" in [st for y, x, t, st in _r.puts if t == " github "]) and "✗" in _r.text(), _r.puts[:4]
+assert ("title-bad" in [st for y, x, t, st in _r.puts if t == " RUNS "]) and "✗" in _r.text(), _r.puts[:4]
 assert "3 min ago · stale" in _r.text().splitlines()[0], _r.text()                                      # how old the list is
 _r = Recorder(10, 100)
 boxes.github_box(_r, 0, 100, [{"databaseId": 1, "workflowName": "CI", "headBranch": "main", "headSha": "abc1234", "status": "completed",
                                "conclusion": "success", "repo": "a/b", "createdAt": "2026-10-31T16:00:00Z"}], ["a/b"], age=8)
-assert "title" in [st for y, x, t, st in _r.puts if t == " github "] and "8 s ago" in _r.text() and "stale" not in _r.text()
+assert "title" in [st for y, x, t, st in _r.puts if t == " RUNS "] and "8 s ago" in _r.text() and "stale" not in _r.text()
 
 # an old failure that a later run of the same workflow made good: not red
 _r = Recorder(10, 100)
@@ -1843,7 +1882,7 @@ boxes.github_box(_r, 0, 100, [{"databaseId": 2, "workflowName": "CI", "headBranc
                                "conclusion": "success", "repo": "a/b", "createdAt": "2026-10-31T17:00:00Z"},
                               {"databaseId": 1, "workflowName": "CI", "headBranch": "main", "headSha": "abc1234", "status": "completed",
                                "conclusion": "failure", "repo": "a/b", "createdAt": "2026-10-31T16:00:00Z"}], ["a/b"])
-assert "title" in [st for y, x, t, st in _r.puts if t == " github "], _r.puts[:4]
+assert "title" in [st for y, x, t, st in _r.puts if t == " RUNS "], _r.puts[:4]
 
 # the head at 80 columns, with all of it: the health's word and what is to be done stay whole, the time gives way
 _full = types.SimpleNamespace(runs=[], requests=[], problem="", jobs={}, working={}, said="", update_ready=True)
@@ -1857,18 +1896,21 @@ assert "2 red · 3 stale · low disk" in _head and "update ready · u" in _head 
 # before gh first answers: a box that says it is asking, not a gap
 _one = configured("[deck]\nrepos = o/alpha\n")
 _wait = types.SimpleNamespace(runs=None, requests=[], problem="", jobs={}, working={}, said="", cfg=_one)
-assert "╭─ github" in drawn(_one, _wait) and "asking GitHub" in drawn(_one, _wait)
+assert " RUNS " in drawn(_one, _wait) and "asking GitHub" in drawn(_one, _wait)
 assert boxes.moving([], _wait) and not boxes.moving([], nothing)
 # the head: the time at the right, the health's word after the name and not over its trail
 _head = drawn(two, nothing).splitlines()[0]
-assert _head.startswith(" ◐ runnerdeck ▓▒░") and re.search(r"\d\d:\d\d:\d\d$", _head), _head
+assert _head.startswith(" RUNNERDECK ") and re.search(r"\d\d:\d\d:\d\d$", _head), _head
 
-grid = terminal.Grid(11, 80)
-intro.paint(grid, intro.STEPS + intro.HOLD, "2 repositories")
-assert all(line in grid.text() for line in intro.LOGO) and "runners · machines · runs" in grid.text() and "100%" in grid.text() and "2 repositories" in grid.text()
-early = terminal.Grid(11, 80)
+grid = terminal.Grid(15, 80)
+intro.paint(grid, intro.DONE, "2 repositories")
+assert all(line in grid.text() for line in intro.LOGO) and intro.TAGLINE in grid.text() and "100%" in grid.text() and "2 repositories" in grid.text()
+early = terminal.Grid(15, 80)
 intro.paint(early, 2)
 assert intro.LOGO[0] not in early.text() and "100%" not in early.text()
+wiped = terminal.Grid(15, 80)
+intro.paint(wiped, intro.FRAMES - 1)                                            # the wipe: the name is gone under it
+assert intro.LOGO[0] not in wiped.text() and wiped.text().strip()
 assert max(len(line) for line in intro.LOGO) <= 40, "the logo must fit in 80 columns with room"
 assert intro.facts(types.SimpleNamespace(repos=["a/b"]), [], []) == "1 repository"
 assert intro.facts(types.SimpleNamespace(repos=["a/b", "c/d"]), [1, 2], [3]) == "2 repositories · 2 runners · 1 other computer"
@@ -1897,14 +1939,34 @@ try:
     intro.play(Window([], (30, 40)))
 finally:
     terminal.Screen.flush = real_flush
-assert full.frames == intro.STEPS + intro.HOLD and skipped.frames == 2 and small.frames == 0, (full.frames, skipped.frames, small.frames)
+assert full.frames == intro.FRAMES and skipped.frames == 2 and small.frames == 0, (full.frames, skipped.frames, small.frames)
+# ↑↓ choose only what the page shows: on LOGS nothing is chosen, so c cancels nothing; on DECK it asks first
+from runnerdeck import app as _app
+_frames = []
+_real = (_app.paint, _app.behind, terminal.Screen.flush)
+terminal.Screen.flush = lambda self: None
+_app.paint = lambda screen, cfg, runners, queue, machine, shown, note, picked, dialog, pcs, health, page: _frames.append(
+    (page, picked, dialog and dialog["title"]))
+_app.behind = lambda: False
+_q = types.SimpleNamespace(runs=[dict(a_run("a/b", 7), status="in_progress", conclusion="")], requests=[], problem="", jobs={},
+                           working={}, said="", update_ready=False)
+try:
+    _app.show(Window([ord("3"), terminal.K_UP, ord("c"), ord("1"), terminal.K_UP, ord("c"), ord("n"), ord("q"), ord("q")]),
+              configured("[deck]\nrepos = a/b\n"), [], _q, None)
+finally:
+    _app.paint, _app.behind, terminal.Screen.flush = _real
+    terminal.STYLE.clear()
+assert not any(page == 3 and (picked is not None or title == "Cancel") for page, picked, title in _frames), _frames
+assert any(page == 1 and picked == 7 and title == "Cancel" for page, picked, title in _frames), _frames
+assert any(title == "Leave" for _, _, title in _frames)
+
 # --status is text for a person or a script: no opening in it
 with tempfile.TemporaryDirectory() as tmp:
     with open(os.path.join(tmp, "c.ini"), "w") as file:
         file.write("[deck]\nrepos = a/b\n")
     got = subprocess.run([sys.executable, "-m", "runnerdeck", "--status"], env=dict(os.environ, RUNNERDECK_CONFIG=os.path.join(tmp, "c.ini"), PYTHONPATH=ROOT),
                          capture_output=True, text=True, timeout=60)
-    assert "◐ runnerdeck" in got.stdout and intro.LOGO[0] not in got.stdout and "\x1b" not in got.stdout, got.stdout
+    assert " RUNNERDECK " in got.stdout and intro.LOGO[0] not in got.stdout and "\x1b" not in got.stdout, got.stdout
 
 # the head line says what to do, in few words; the full sentence stays in --status
 from runnerdeck.boxes import head_why

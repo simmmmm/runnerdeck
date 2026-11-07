@@ -13,7 +13,8 @@ import time
 from .config import ConfigError, FOLDER, HOST, REFERENCE, SLUG, WORD, configure, default_path, set_approval, set_host, set_section
 from .machines import explain_ssh
 from .runners import Runner, TOKEN, find_runners, gh_token, plan_of, set_up
-from .terminal import K_BACKSPACE, K_DELETE, K_DOWN, K_END, K_HOME, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, colours, frame
+from .terminal import (ANIM, GLYPH, K_BACKSPACE, K_DELETE, K_DOWN, K_END, K_HOME, K_LEFT, K_RESIZE, K_RIGHT, K_UP, MOTION,
+                       Screen, colours, ease, frame, panel, progress, spin, start)
 
 # Each step: its kind (info, text or yesno) and the title on the right of its frame.
 STEPS = {
@@ -681,8 +682,41 @@ def caret(text, at, room):
     return (text[:at] + "▏" + text[at:])[start:start + room]
 
 
+TONES = {"plain": "dlg", "strong": "dlg-strong", "dim": "dlg-dim", "label": "dlg-dim", "warm": "dlg-strong", "bad": "dlg-chip",
+         "good": "dlg-strong"}
+
+
 def draw(canvas, view):
-    """One question, in a frame in the middle."""
+    """One question, on the orange panel at the right, as the screen's questions are. A long text to read (a
+    log) and a narrow screen keep the wide page."""
+    rows = []
+    for item in view["lines"]:
+        style, text = item if isinstance(item, tuple) else ("plain", item)
+        rows += [(style, piece) for piece in (textwrap.wrap(text, max(10, min(canvas.width - 8, max(64, int(canvas.width * 0.62))) - 12)) or [""])]
+    if len(rows) > canvas.height - 10 or canvas.width < 90:
+        page(canvas, view)
+        return
+    if ANIM["view"] != view["title"]:
+        ANIM["view"] = view["title"]
+        start("view_at", 0.35)
+    x, w, bottom = panel(canvas, view["title"] or "setup", progress("view_at", 0.3), wide=True)
+    if view["busy"]:
+        rows += [("plain", ""), ("warm", spin("…") + " " + view["busy"])]
+    if view["note"]:
+        rows += [("plain", "")] + [("bad" if view["bad"] else "warm", piece) for piece in textwrap.wrap(view["note"], w - 2)]
+    y = max(3, (bottom - len(rows) - 4) // 2)
+    for at, (style, text) in enumerate(rows):
+        canvas.put(y + at, x, (f" {text} " if style == "bad" else text)[:w], TONES.get(style, "dlg"))
+    y += len(rows) + 1
+    if view["field"] is not None:
+        shown = ("●" * len(view["field"])) if view["secret"] else view["field"]
+        canvas.put(y, x, " " * w, "dlg-field")
+        canvas.put(y, x + 1, caret(shown, view.get("at", len(shown)), w - 2), "dlg-field" if view["fresh"] else "dlg-value")
+    canvas.put(bottom - 2, x, view["hint"][:w], "dlg-dim")
+
+
+def page(canvas, view):
+    """One question, or a text to read, across the screen."""
     width = min(canvas.width - 2, 78)
     inner = max(10, width - 6)
     rows = []
@@ -738,18 +772,37 @@ def show_text(terminal, title, lines):
 
 
 def menu(terminal, title, items, intro=()):
-    """A list to choose one from, on the screen: the arrow keys and Enter, or the number of an item.
-    The index of what was chosen, or None for Esc."""
+    """A list to choose one from: the name at the top left, a stack of grey bars with ▸ that slide in one
+    after the other, the chosen one orange, crosshairs at the right. The arrow keys and Enter, or the number
+    of an item. The index of what was chosen, or None for Esc."""
     colours()
     cursor = 0
+    opened = time.time()
     while True:
         canvas = Screen(terminal)
-        lines = list(intro) + ([""] if intro else [])
-        lines += [("strong" if i == cursor else "plain", f"{'›' if i == cursor else ' '} {i + 1}. {item}") for i, item in enumerate(items)]
-        draw(canvas, {"title": title, "lines": lines, "field": None, "secret": False, "fresh": False, "busy": None,
-                      "hint": "↑ ↓: move · enter: choose · esc: close", "note": "", "bad": False})
+        width, height = canvas.width, canvas.height
+        now = time.time() - opened if MOTION[0] else 99
+        canvas.put(1, 2, " RUNNERDECK ", "title")
+        canvas.put(1, 14, GLYPH["lit"] * 3, "glitch")
+        canvas.put(1, 19, title.upper().rstrip("?").replace(" ", "_")[:width - 21], "strong")
+        for at, line in enumerate(intro):
+            canvas.put(3 + at, 2, line[:width - 4], "label")
+        top = 4 + len(intro) + (1 if intro else 0)
+        bar = min(max(46, max(len(item) for item in items) + 10), width - 4)
+        step = 2 if top + 2 * len(items) < height - 3 else 1
+        for at, item in enumerate(items):
+            shown = int(bar * ease((now - at * 0.05) / 0.25))
+            line = f" {at + 1}  {item}".ljust(bar - 2)[:bar - 2] + "▸ "
+            canvas.put(top + at * step, 2, line[:shown], "picked" if at == cursor else "menu")
+        for cy in (top, height - 5):
+            for cx in (bar + 12, width - 12):
+                if cx > bar + 6 and cy > top - 1:
+                    canvas.put(cy - 1, cx, "╷", "frame")
+                    canvas.put(cy, cx - 2, "╶─┼─╴", "frame")
+                    canvas.put(cy + 1, cx, "╵", "frame")
+        canvas.put(height - 2, 2, "↑ ↓: move · enter: choose · esc: close"[:width - 4], "label")
         canvas.flush()
-        key = terminal.key()
+        key = terminal.key(0.03 if now < 0.05 * len(items) + 0.3 else 1.0)
         if key == K_RESIZE:
             sys.stdout.buffer.write(b"\x1b[2J")
         elif key == K_UP:

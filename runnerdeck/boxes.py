@@ -5,10 +5,11 @@ import time
 from .util import STAMP, ago, moment
 from .builds import recent as recent_builds
 from .system import alive
-from .github import row_of
+from .github import row_of, run_detail
 from .health import ISSUE_ROW, health_box, height_of
 from .machines import power, run, watts
-from .terminal import frame, graph, heat, meter, popup, right, spin
+from .terminal import GLYPH, MOTION, Inset, Screen, decode, ease, frame, graph, heat, meter, popup, right, spin
+from .terminal import progress as progress_of
 
 
 MARKS = {"running": "●", "listening": "○", "starting": "◌"}
@@ -141,49 +142,6 @@ def progress(job):
     return (done / len(steps) if steps else 0), words, ""
 
 
-def runners_box(canvas, y, width, runners, queue, title="runners"):
-    """Each runner: what it is doing in its own words, the last result in
-    its colour, and a busy one's progress beside it, or under it where the
-    screen is narrow."""
-    wide = width >= 110
-    rows = []
-    for runner in runners:
-        state, job, since, last = runner.state()
-        busy = queue.jobs.get(runner.name) if state == "running" else None
-        rows.append((runner, state, job, since, last, busy))
-    height = 2 + len(rows) + sum(1 for row in rows if row[5] and not wide)
-    busy_count = sum(1 for row in rows if row[1] == "running")
-    failed = any(row[4] and "fail" in row[4] and row[1] != "running" for row in rows)
-    frame(canvas, y, 0, height, width, title, f"{busy_count} of {len(rows)} busy", "bad" if failed else None)
-    line = y + 1
-    for runner, state, job, since, last, busy in rows:
-        style = "strong" if state == "running" else "dim" if state in ("stopped", "not set up") else "plain"
-        mark = spin(MARKS["running"]) if state == "running" else MARKS.get(state, "·")
-        canvas.put(line, 2, mark, "good" if state == "running" else style)
-        canvas.put(line, 4, runner.name, style)
-        words = f"Running {job}" if state == "running" else WORDS[state]
-        canvas.put(line, 11, words, style)
-        if last and state != "running":
-            canvas.put(line, 11 + len(words), " · last ", "dim")
-            canvas.put(line, 19 + len(words), last, "bad" if "fail" in last else "good" if "succeed" in last else "plain")
-        when = ago(since)
-        tools = runner.toolchain() if hasattr(runner, "toolchain") else ""
-        if tools and not busy and wide:
-            right(canvas, line, width - len(when) - 4, tools, "dim")
-        if busy:
-            share, steps, left = progress(busy)
-            at, place = (line, 34) if wide else (line + 1, 11)
-            meter(canvas, at, place, 16, share, "good", scan=True)
-            canvas.put(at, place + 18, steps[:max(0, width - place - 22 - len(left) - len(when) - 6)], "dim")
-            if left:
-                when = f"{left} · {when}" if wide else when
-                if not wide:
-                    right(canvas, at, width, left, "label")
-        right(canvas, line, width, when, "label")
-        line += 2 if busy and not wide else 1
-    return y + height
-
-
 def repo_labels(repos):
     """The short name of each repository, the part after the owner; the whole
     name where two have the same."""
@@ -225,11 +183,11 @@ def github_box(canvas, y, width, runs, repos, picked=None, working=None, on=None
         if run.get("status") == "completed":
             newest.setdefault((run.get("repo"), run.get("workflowName")), run.get("conclusion"))
     failed = any(conclusion in ("failure", "timed_out", "startup_failure") for conclusion in newest.values())
-    frame(canvas, y, 0, 2 + len(runs), width, "github", names + told, "bad" if failed else None)
+    frame(canvas, y, 0, 2 + len(runs), width, "RUNS", names + told, "bad" if failed else None)
     for line, run in enumerate(runs, start=y + 1):
         doing = working.get(run.get("databaseId"))
         if run.get("databaseId") == picked:
-            canvas.put(line, 1, "▸" + " " * (width - 3), "picked")
+            canvas.put(line, 0, " ▸" + " " * (width - 2), "picked")
             canvas.put(line, 4, run.get("workflowName", "")[:name_w], "picked")
             canvas.put(line, branch_at, run.get("headBranch", "")[:branch_w], "picked")
             canvas.put(line, sha_at, run.get("headSha", "")[:7], "picked")
@@ -260,7 +218,7 @@ def span(seconds):
     return f"{round(seconds)} s" if seconds < 90 else f"{round(seconds / 60)} min"
 
 
-def builds_box(canvas, y, width, builds, title="builds"):
+def builds_box(canvas, y, width, builds, title="BUILDS"):
     """Builds that did not go through GitHub, as a runner's rows are: what runs now first, then the latest,
     each with how it ended, how long it took and how long ago."""
     shown = sorted(builds, key=lambda b: (b["status"] != "running", -(b["start"] or 0)))[:5]
@@ -289,7 +247,7 @@ def builds_box(canvas, y, width, builds, title="builds"):
 
 def requests_box(canvas, y, width, requests, picked=None, working=None, labels=None):
     working = working or {}
-    frame(canvas, y, 0, 2 + len(requests), width, "waiting for you", "a: start · d: decline")
+    frame(canvas, y, 0, 2 + len(requests), width, "WAITING FOR YOU", "a: start · d: decline", "warm")
     # The columns follow the names: "Publish Linux" and "Publish Apple" must not be cut to the same twelve letters.
     plain = [r for r in requests if not r.get("kind")]
     name_w = min(24, max([12] + [len(r["workflow"]) for r in plain]))
@@ -300,7 +258,7 @@ def requests_box(canvas, y, width, requests, picked=None, working=None, labels=N
         chosen = row_of(request) == picked
         doing = working.get(row_of(request))
         if chosen:
-            canvas.put(line, 1, "▸" + " " * (width - 3), "picked")
+            canvas.put(line, 0, " ▸" + " " * (width - 2), "picked")
         else:
             canvas.put(line, 2, "?", "warm")
         if request.get("kind"):
@@ -358,9 +316,9 @@ def log_box(canvas, y, width, height, runners, shown):
     others grey, a dot where a job runs."""
     runner = runners[shown]
     right_text = "←→ other log" if width >= 70 else ""
-    frame(canvas, y, 0, height, width, "log", right_text)
+    frame(canvas, y, 0, height, width, "LOG", right_text)
     labels = [f" {spin('●') + ' ' if other.state()[0] == 'running' else ''}{other.name} " for other in runners]
-    start = 4 + len("log") + 2
+    start = 4 + len("LOG") + 2
     room = width - 2 - start - (len(right_text) + 5 if right_text else 1)
     first, last = fit_tabs([len(label) for label in labels], shown, max(room, len(labels[shown])))
     x = start
@@ -378,7 +336,7 @@ def log_box(canvas, y, width, height, runners, shown):
         canvas.put(at, 2 + cut, line[cut:width - 4], style)
 
 
-def footer(canvas, y, width, note, picking=None):
+def footer(canvas, y, width, note, picking=None, page=1):
     if note:
         canvas.put(y, 1, note[:width - 2], "warm")
         return
@@ -387,14 +345,14 @@ def footer(canvas, y, width, note, picking=None):
     # h are not listed: they still work, and the menu names them. Where the width is short, the
     # first three here stay (move, back, quit) and the others go from the right.
     leave = "quit, runners stay on" if width >= 100 else "quit"
-    general = (("m", "settings"), ("s", "start"), ("x", "stop"), ("←→", "logs"), ("q", leave))
+    general = (("m", "settings"), ("s", "start"), ("x", "stop"), ("1-4", "pages"), ("q", leave))
     keys = {"run": (("↑↓", "choose"), ("c", "cancel"), ("r", "run again"), ("l", "log"), ("o", "open"), ("esc", "back")) + general,
             "issue": (("↑↓", "choose"), ("o", "open"), ("esc", "back")) + general,
             "request": (("↑↓", "choose"), ("enter", "start"), ("d", "decline"), ("esc", "back")) + general,
-            "dialog": (("y", "yes"), ("n", "no"), ("← →", "choose"), ("enter", "answer")),
+            "dialog": (("y", "yes"), ("n", "no"), ("↑↓", "choose"), ("enter", "answer")),
             "field": (("enter", "set up"), ("esc", "cancel")),
-            None: (("↑↓", "runs"),) + general}[picking]
-    must = {"↑↓", "esc", "q"} if picking in ("run", "request", "issue", None) else {key for key, _ in keys}
+            None: ((("↑↓", "choose"),) if page in (1, 2) else (("←→", "other log"),) if page == 3 else ()) + general}[picking]
+    must = {"↑↓", "←→", "esc", "q"} if picking in ("run", "request", "issue", None) else {key for key, _ in keys}
     used = sum(len(k) + len(w) + 4 for k, w in keys if k in must)
     shown = []
     for key, words in keys:
@@ -419,100 +377,365 @@ def head_why(why):
     return why.split(". ")[0]
 
 
-def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog=None, pcs=(), health=None):
-    """The whole screen: the head, this machine and the others, the runners,
-    GitHub's last runs and a log, the log taking what is left and GitHub
-    giving way first."""
-    width, height = canvas.width, canvas.height
-    canvas.put(0, 1, "◐ runnerdeck", "logo")
-    canvas.put(0, 14, "▓▒░", "glitch")
-    # The right of the head, from the right: the time (it moves: the screen is live), whether the
-    # machine stays awake, whether an update is ready.
-    # The left of the head first: the name, then the health's word; then the right, from the right, as
-    # far as there is room: the time goes first, as it only says that the screen is live.
-    at = 18
-    if health:
-        word, style = health.words()
-        if word:
-            canvas.put(0, at, word, style)
-            at += len(word) + 2
-    parts = []
-    if getattr(queue, "update_ready", False):
-        parts.append(("update ready · u", "warm"))
-    if runners:
-        awake = alive(cfg.awake)
-        parts.append((("awake" if awake else "may sleep") + (" · notifying" if alive(cfg.watch) else ""), "good" if awake else "warm"))
-    parts.append((time.strftime("%H:%M:%S"), "label"))
-    while parts and width - 1 - sum(len(text) + 3 for text, _ in parts) < at:
-        parts.pop()
-    edge = width - 1
-    for text, style in reversed(parts):
-        edge -= len(text)
-        canvas.put(0, edge, text, style)
-        edge -= 3
-    # The graphs grow a row where the screen has the room: never at the cost of the runs and the log.
-    boxes = bool(machine) + sum(1 for pc in pcs if pc.reachable())
-    tall = 2 if boxes and height >= 36 + 6 * boxes else 1
-    y = 1
-    if machine:
-        y = mac_box(canvas, y, width, machine, tall)
-    # A computer that did not answer has no box: a line in the head says which.
+# The pages, each for one question. DECK: does anything need me, what runs, what happened. RUNS: what
+# happened, and why, step by step. LOGS: what a runner says. MACHINES: how the computers do. 1-4 choose.
+PAGES = ((1, "DECK", "DECK_OVERVIEW"), (2, "RUNS", "RUN_MANIFEST"), (3, "LOGS", "RUNNER_LOGS"), (4, "MACHINES", "MACHINES"))
+FAILED = ("failure", "timed_out", "startup_failure")
+DIGITS = {"0": ("┏━┓", "┃ ┃", "┗━┛"), "1": (" ┓ ", " ┃ ", " ┻ "), "2": ("┏━┓", "┏━┛", "┗━━"), "3": ("━━┓", " ━┫", "━━┛"),
+          "4": ("╻ ╻", "┗━┫", "  ╹"), "5": ("┏━━", "┗━┓", "━━┛"), "6": ("┏━━", "┣━┓", "┗━┛"), "7": ("━━┓", "  ┃", "  ╹"),
+          "8": ("┏━┓", "┣━┫", "┗━┛"), "9": ("┏━┓", "┗━┫", "━━┛"), "/": ("  ╱", " ╱ ", "╱  ")}
+NAME_CHIP = "RUNNERDECK"
+
+
+def big(canvas, y, x, text, style):
+    """A number three rows high, of heavy lines; one row where the font has none."""
+    if not GLYPH["digits"]:
+        canvas.put(y + 1, x, text, style)
+        return
+    for row in range(3):
+        canvas.put(y + row, x, "".join(DIGITS.get(c, ("   ",) * 3)[row] for c in text), style)
+
+
+def band(canvas, y, x, width, chip, columns=(), right_text="", tone=None):
+    """A table's head: a grey band, its name as a chip, the names of its columns in it."""
+    canvas.put(y, x, " " * width, "band")
+    canvas.put(y, x + 1, f" {chip} ", f"title-{tone}" if tone else "title")
+    for at, label in columns:
+        canvas.put(y, x + at, label, "band")
+    if right_text:
+        canvas.put(y, x + width - 1 - len(right_text), right_text, "band")
+
+
+def every_runner(cfg, runners, machine, pcs):
+    """Each runner with the name of its computer: this one's first, then those read over ssh."""
+    here = cfg.computer or ("mac" if machine else next((pc.name for pc in pcs if not pc.host), "here"))
+    rows, seen = [], set()
+    for name, group in [(here, runners)] + [(pc.name, pc.runner_list()) for pc in pcs
+                                            if pc.reachable() and hasattr(pc, "runner_list")]:
+        for runner in group:
+            if runner.name not in seen:
+                seen.add(runner.name)
+                rows.append((name, runner))
+    return rows
+
+
+def red(runs):
+    """The workflows whose newest finished run failed: not an old failure that a later run made good."""
+    newest = {}
+    for run in sorted(runs or [], key=lambda run: run.get("createdAt", ""), reverse=True):
+        if run.get("status") == "completed":
+            newest.setdefault((run.get("repo"), run.get("workflowName")), run)
+    return [run for run in newest.values() if run.get("conclusion") in FAILED]
+
+
+def needs(queue, pcs, rows):
+    """What asks for a person, other than a request (that has its own box): a red workflow, a computer that
+    does not answer, a runner that is stopped. The worst first."""
+    said = [(f"{run['workflowName']} red on {run.get('headBranch', '')} · {run.get('repo', '').split('/')[-1]} · "
+             f"{ago(moment(run.get('createdAt', ''), STAMP))} · ↑↓ then l for its log", "bad") for run in red(queue.runs)]
     for pc in pcs:
-        if not pc.reachable():
-            continue
-        if getattr(pc, "kind", "linux") == "macos":
-            y = mac_box(canvas, y, width, pc, tall)
-            if pc.runners:
-                y = runners_box(canvas, y, width, pc.runner_list(), queue, f"runners · {pc.name}")
+        if getattr(pc, "failed", False) and not pc.reachable():
+            why = getattr(pc, "why", "")
+            said.append((f"{pc.name} not answering" + (f": {head_why(why)}" if why else ""), "warm"))
+    said += [(f"{runner.name} on {where} is stopped · s starts it", "warm") for where, runner in rows
+             if runner.state()[0] in ("stopped", "not set up")]
+    return said
+
+
+def vitals(canvas, y, x, name, now, history):
+    """A computer in one line: CPU as a graph and a number, GPU, memory as a meter, how hot or what it draws."""
+    canvas.put(y, x + 2, name[:13], "plain")
+    graph(canvas, y, x + 16, 10, 1, history)
+    for at, value in ((x + 27, now.get("cpu")), (x + 33, now.get("gpu"))):
+        canvas.put(y, at, "  —" if value is None else f"{value:3.0f}%", "dim" if value is None else heat(value / 100))
+    used = now.get("memory")
+    if used:
+        meter(canvas, y, x + 40, 10, used[0] / used[1])
+        canvas.put(y, x + 51, f"{used[0]:.0f}/{used[1]:.0f} GB", "plain")
+    watts = (now.get("power") or {}).get("watts")
+    extra = f"{now['cpu_temp']:.0f} °C" if now.get("cpu_temp") is not None else f"{watts:.0f} W" if watts is not None else ""
+    canvas.put(y, x + 62, extra, "plain")
+
+
+def runner_rows(canvas, y, x, width, rows, queue):
+    """Every runner: its mark, name, computer, what it does (a busy one's meter and step), how long."""
+    name_w = min(20, max([9] + [len(runner.name) for _, runner in rows]) + 1)
+    where_w = min(14, max([8] + [len(where) for where, _ in rows]) + 2)
+    states = [runner.state() for _, runner in rows]
+    busy = sum(1 for state in states if state[0] == "running")
+    failed = any(state[3] and "fail" in state[3] and state[0] != "running" for state in states)
+    state_at = 3 + name_w + where_w
+    band(canvas, y, x, width, "RUNNERS", ((3 + name_w, "COMPUTER"), (state_at, "STATE")), f"{busy} of {len(rows)} busy",
+         "bad" if failed else None)
+    for line, ((where, runner), (state, job, since, last)) in enumerate(zip(rows, states), start=y + 1):
+        job_now = queue.jobs.get(runner.name) if state == "running" else None
+        style = "strong" if state == "running" else "dim" if state in ("stopped", "not set up") else "plain"
+        canvas.put(line, x + 1, spin(MARKS["running"]) if state == "running" else MARKS.get(state, "·"),
+                   "warm" if state == "running" else style)
+        canvas.put(line, x + 3, runner.name[:name_w - 1], style)
+        canvas.put(line, x + 3 + name_w, where[:where_w - 1], "label")
+        when = ago(since)
+        room = width - state_at - len(when) - 3
+        if job_now:
+            share, steps, left = progress(job_now)
+            meter(canvas, line, x + state_at, 12, share, "warm", scan=True)
+            canvas.put(line, x + state_at + 13, f"{steps}{' · ' + left if left else ''}"[:max(0, room - 13)], "plain")
         else:
-            y = pc_box(canvas, y, width, pc, tall)
-            rows = pc.runner_list() if hasattr(pc, "runner_list") else []
-            if rows:
-                y = runners_box(canvas, y, width, rows, queue, f"runners · {pc.name}")
-    down = [pc for pc in pcs if getattr(pc, "failed", False) and not pc.reachable()]
-    if down:
-        words = "· " + ", ".join(pc.name for pc in down) + " not answering"
-        if len(down) == 1 and getattr(down[0], "why", ""):
-            words += f": {head_why(down[0].why)}"
-        canvas.put(0, at, words[:max(0, edge - at)], "dim")
-    if runners:
-        y = runners_box(canvas, y, width, runners, queue)
-    here = recent_builds()
-    if here:
-        y = builds_box(canvas, y, width, here, "builds")
-    for pc in pcs:
-        if pc.reachable() and pc.now.get("builds"):
-            y = builds_box(canvas, y, width, pc.now["builds"], f"builds · {pc.name}")
+            words = f"Running {job}" if state == "running" else WORDS.get(state, state)
+            canvas.put(line, x + state_at, words[:room], style)
+            if last and state != "running" and len(words) + 8 < room:
+                canvas.put(line, x + state_at + len(words), " · last ", "dim")
+                canvas.put(line, x + state_at + len(words) + 8, last[:room - len(words) - 8],
+                           "bad" if "fail" in last else "plain")
+        canvas.put(line, x + width - 1 - len(when), when, "label")
+    return y + 1 + len(rows)
+
+
+def loading(canvas, y, width, words):
+    """A segmented bar that fills and starts again, while something is asked."""
+    canvas.put(y, (width - len(words)) // 2, words, "label")
+    lit = int(time.time() * 10) % 31 if MOTION[0] else 15
+    canvas.put(y + 1, (width - 30) // 2, "▌" * lit, "strong")
+    canvas.put(y + 1, (width - 30) // 2 + lit, "▌" * (30 - lit), "empty")
+
+
+def deck(canvas, cfg, runners, queue, machine, picked, pcs, health):
+    width, height = canvas.width, canvas.height
+    rows = every_runner(cfg, runners, machine, pcs)
+    y = 2
+    for at, (words, style) in enumerate(needs(queue, pcs, rows)[:3]):
+        if at == 0:
+            canvas.put(y, 0, " NEEDS_YOU ", "title-bad" if style == "bad" else "title-warm")
+        canvas.put(y, 13, "■ " + words[:width - 15], style)
+        y += 1
+    y += 1 if y > 2 else 0
+    # Left, where there is the room: four numbers, big, that count up when the page opens. Right: every runner,
+    # then each computer in a line.
+    wide = width >= 100
+    x = 31 if wide else 0
+    w = width - x
+    top = y
+    if wide:
+        up = ease(progress_of("page", 0.7))
+
+        def count(n):
+            return str(round(n * up))
+        busy = sum(1 for _, runner in rows if runner.state()[0] == "running")
+        reds = red(queue.runs)
+        stats = (("BUSY", f"{count(busy)}/{len(rows)}", "warm" if busy else "strong"),
+                 ("RED", count(len(reds)), "bad" if reds else "strong"),
+                 ("WAITING", count(len(queue.requests)), "warm" if queue.requests else "strong"),
+                 ("RUNS", count(len(queue.runs or [])), "strong"))
+        for at, (label, value, style) in enumerate(stats):
+            sy, sx = y + (at // 2) * 5, 1 + (at % 2) * 14
+            canvas.put(sy, sx, label, "label")
+            big(canvas, sy + 1, sx, value, style)
+    if rows:
+        y = runner_rows(canvas, y, x, w, rows, queue) + 1
+    computers = ([machine] if machine else []) + [pc for pc in pcs if pc.reachable()]
+    if computers:
+        band(canvas, y, x, w, "MACHINES", ((16, "CPU"), (33, "GPU"), (40, "RAM"), (62, "HEAT/POWER")) if w >= 70 else ())
+        for line, pc in enumerate(computers, start=y + 1):
+            name = getattr(pc, "name", None) or cfg.computer or getattr(pc, "title", "mac")
+            vitals(canvas, line, x, name, pc.now, pc.cpu)
+        y += 1 + len(computers)
+    y = max(y, top + 10 if wide else y) + 1
+    # Below: what waits for a yes never gives way; then the builds, the health, and the runs, which give way first.
     if queue.requests:
         y = requests_box(canvas, y, width, queue.requests, picked, queue.working,
                          repo_labels(cfg.repos) if len(cfg.repos) > 1 else None)
-    room = height - 1 - y
+    here = recent_builds()
+    if here and height - 3 - y >= 2 + min(5, len(here)) + 3:
+        y = builds_box(canvas, y, width, here, "BUILDS")
+    for pc in pcs:
+        if pc.reachable() and pc.now.get("builds") and height - 3 - y >= 5:
+            y = builds_box(canvas, y, width, pc.now["builds"], f"BUILDS · {pc.name}")
+    if height_of(health) and height - 3 - y >= height_of(health) + 3:
+        y = health_box(canvas, y, width, health, picked)
+    room = height - 3 - y
     if not queue.runs and queue.problem and room >= 3:
-        frame(canvas, y, 0, 3, width, "github", "no runs", "warm")
+        frame(canvas, y, 0, 3, width, "RUNS", "no runs", "warm")
         canvas.put(y + 1, 2, queue.problem[:width - 4], "warm")
-        y += 3
     elif queue.runs is None and cfg.repos and room >= 3:
         # Not a silent gap while gh is first asked: it takes a few seconds.
-        frame(canvas, y, 0, 3, width, "github", "reading")
+        frame(canvas, y, 0, 3, width, "RUNS", "reading")
         canvas.put(y + 1, 2, spin("…"), "warm")
         canvas.put(y + 1, 4, f"asking GitHub for the last runs of {', '.join(cfg.repos)}"[:width - 6], "dim")
-        y += 3
-    # Before the runs, which give way first: the box is left out where it does not fit.
-    if height_of(health) and room >= height_of(health) + 7:
-        y = health_box(canvas, y, width, health, picked)
-        room = height - 1 - y
-    if queue.runs and room >= 5:
-        y = github_box(canvas, y, width, queue.runs[:max(1, min(len(queue.runs), room - 7))], cfg.repos, picked, queue.working,
-                       getattr(queue, "on", None), time.time() - queue.at if getattr(queue, "at", None) else None)
-    logs = with_remote(runners, pcs)
-    if logs and height - 1 - y >= 3:
-        log_box(canvas, y, width, height - 1 - y, logs, shown % len(logs))
+    elif queue.runs and room >= 3:
+        github_box(canvas, y, width, queue.runs[:room - 2], cfg.repos, picked, queue.working,
+                   getattr(queue, "on", None), time.time() - queue.at if getattr(queue, "at", None) else None)
+    if height >= 12:
+        canvas.put(height - 2, 1, "TOTAL", "label")
+        canvas.put(height - 2, 8, f"{len(queue.runs or [])} RUNS · {len(cfg.repos)} REPOSITORIES · {len(rows)} RUNNERS"[:width - 9], "plain")
+
+
+def took(step):
+    try:
+        start, end = (moment(step[k], STAMP) for k in ("startedAt", "completedAt"))
+        seconds = end - start
+        return "" if seconds < 0 else f"{seconds:.0f} s" if seconds < 60 else f"{seconds / 60:.0f} min"
+    except (KeyError, TypeError, ValueError):
+        return ""
+
+
+def manifest(canvas, cfg, queue, picked):
+    """The runs as a list at the left; at the right the chosen one: its result as a tag, its name, what it is
+    of, and its jobs and steps as a trace, the one that failed or runs in the middle."""
+    width, height = canvas.width, canvas.height
+    runs = queue.runs or []
+    if queue.runs is None and not queue.problem:
+        loading(canvas, height // 2 - 1, width, "RETRIEVING RUNS FROM GITHUB")
+        return
+    left = min(58, width // 2)
+    labels = repo_labels(cfg.repos)
+    # The repository's column only where there is room for it and a workflow's name.
+    repo_at = left - 38 if left >= 50 else None
+    name_w = (repo_at or left - 24) - 4
+    band(canvas, 2, 0, left, "RUNS", (((repo_at, "REPO"),) if repo_at else ()) + ((left - 24, "RESULT"),), "AGE")
+    chosen = next((run for run in runs if run.get("databaseId") == picked), runs[0] if runs else None)
+    for line, run in enumerate(runs[:height - 5], start=3):
+        conclusion = run.get("conclusion") or (run.get("status") or "").replace("_", " ")
+        style = "picked" if run is chosen and picked is not None else None
+        if style:
+            canvas.put(line, 0, " " * left, style)
+        canvas.put(line, 1, RESULTS.get(conclusion, spin("…")),
+                   style or {"success": "good"}.get(conclusion, "bad" if conclusion in FAILED else "warm"))
+        canvas.put(line, 3, run.get("workflowName", "")[:name_w], style or "plain")
+        if repo_at:
+            canvas.put(line, repo_at, labels.get(run.get("repo"), "")[:13], style or "label")
+        canvas.put(line, left - 24, conclusion.upper()[:11], style or ("bad" if conclusion in FAILED else "plain"))
+        age = ago(moment(run.get("createdAt", ""), STAMP))
+        canvas.put(line, left - 1 - len(age), age, style or "label")
+    canvas.put(height - 2, 1, "TOTAL", "label")
+    canvas.put(height - 2, 8, f"{len(runs)} RUNS", "plain")
+    if not chosen:
+        canvas.put(4, 2, (queue.problem or "no runs yet")[:left - 4], "warm")
+        return
+    x, w = left + 2, width - left - 2
+    band(canvas, 2, x, w, "RUN", (), f"#{chosen['databaseId']}")
+    conclusion = chosen.get("conclusion") or chosen.get("status", "")
+    tone = "title-bad" if conclusion in FAILED else "title" if conclusion == "success" else "title-warm"
+    canvas.put(4, x + 1, f" {conclusion.upper().replace('_', ' ')} ", tone)
+    canvas.put(5, x + 1, chosen.get("workflowName", "").upper()[:w - 2], "strong")
+    got = run_detail(chosen) or {}
+    facts = (("TITLE", got.get("displayTitle", "")), ("REPO", chosen.get("repo", "")), ("BRANCH", chosen.get("headBranch", "")),
+             ("COMMIT", chosen.get("headSha", "")[:7]), ("EVENT", got.get("event", "")),
+             ("RUNNER", (getattr(queue, "on", None) or {}).get(chosen["databaseId"], "")),
+             ("STARTED", ago(moment(chosen.get("createdAt", ""), STAMP)) + " ago"))
+    line = 7
+    for label, value in facts:
+        if value and line < height - 3:
+            canvas.put(line, x + 1, label, "label")
+            canvas.put(line, x + 10, str(value)[:w - 11], "plain")
+            line += 1
+    line += 1
+    if got.get("jobs") is None:
+        canvas.put(line, x + 1, spin("…") + " asking GitHub for the steps", "dim")
+        return
+    trace = []
+    for job in got["jobs"]:
+        trace.append(("job", job.get("name", ""), job.get("conclusion") or job.get("status", ""), took(job)))
+        trace += [("step", step.get("name", ""), step.get("conclusion") or step.get("status", ""), took(step))
+                  for step in job.get("steps", [])]
+    room = height - 2 - line
+    if room <= 0 or not trace:
+        return
+    stuck = next((at for at, item in enumerate(trace) if item[2] not in ("success", "skipped", "completed")), len(trace) - 1)
+    first = max(0, min(stuck - room // 2, len(trace) - room))
+    for kind, name, state, length in trace[first:first + room]:
+        if kind == "job":
+            canvas.put(line, x + 1, name.upper()[:w - 10], "label")
+        else:
+            mark, style = (("■", "warm") if state == "success" else ("■", "bad") if state in FAILED
+                           else ("□", "dim") if state == "skipped" else (spin("■"), "strong"))
+            canvas.put(line, x + 2, mark, style)
+            canvas.put(line, x + 4, name[:w - 14], "bad" if state in FAILED else "plain" if state == "success" else "dim")
+        canvas.put(line, x + w - 1 - len(length), length, "label")
+        line += 1
+
+
+def head(canvas, cfg, runners, queue, health, page):
+    """The name, the page, the health's word; at the right what is to be done, whether the machine stays
+    awake, the pages and the time. Where it is short, the time goes first, then the page's name, then the
+    pages' names (their numbers stay), then the pages."""
+    width = canvas.width
+    canvas.put(0, 0, f" {NAME_CHIP} ", "title")
+    beat = int(time.time() * 2) if MOTION[0] else 1
+    canvas.put(0, 12, "".join(GLYPH["unlit"] if (beat + at) % 4 == 0 else GLYPH["lit"] for at in range(3)), "glitch")
+    word, style = health.words() if health else ("", "")
+    must = []
+    if getattr(queue, "update_ready", False):
+        must.append(("update ready · u", "warm"))
+    if runners:
+        awake = alive(cfg.awake)
+        must.append((("awake" if awake else "may sleep") + (" · notifying" if alive(cfg.watch) else ""), "good" if awake else "warm"))
+    title = next(long for n, _, long in PAGES if n == page)
+    full = [(f" {n} {short} ▸ ", "pop-on" if n == page else "key") for n, short, _ in PAGES]
+    small = [(f" {n} ", "pop-on" if n == page else "key") for n, _, _ in PAGES]
+    clock = (time.strftime("%H:%M:%S"), "label")
+    for named, chips, timed in ((True, full, True), (True, full, False), (False, full, False), (False, small, False),
+                                (False, [], False)):
+        left = 17 + (len(title) + 2 if named else 0) + (len(word) + 2 if word else 0)
+        parts = must + ([("chips", "")] if chips else []) + ([clock] if timed else [])
+        need = sum((sum(len(c) + 1 for c, _ in chips) if text == "chips" else len(text)) + 3 for text, _ in parts)
+        if left + need <= width + 3:
+            break
+    at = 17
+    if named:
+        canvas.put(0, at, title, "strong")
+        at += len(title) + 2
+    if word:
+        canvas.put(0, at, word, style)
+    edge = width
+    for text, part_style in reversed(parts):
+        if text == "chips":
+            for chip, chip_style in reversed(chips):
+                edge -= len(chip)
+                canvas.put(0, edge, chip, chip_style)
+                edge -= 1
+            edge -= 2
+        else:
+            edge -= len(text)
+            canvas.put(0, edge, text, part_style)
+            edge -= 3
+
+
+def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog=None, pcs=(), health=None, page=1):
+    """The screen: the head, the page, the foot; a question over all of it. On a terminal a margin goes
+    round it; --status's text has none."""
+    screen = canvas
+    if isinstance(canvas, Screen):
+        canvas = Inset(canvas)
+    width, height = canvas.width, canvas.height
+    head(canvas, cfg, runners, queue, health, page)
+    if page == 2:
+        manifest(canvas, cfg, queue, picked)
+    elif page == 3:
+        logs = with_remote(runners, pcs)
+        if logs and height >= 6:
+            log_box(canvas, 2, width, height - 3, logs, shown % len(logs))
+        elif not logs:
+            canvas.put(3, 1, "No runner has a log to show here.", "dim")
+    elif page == 4:
+        computers = ([machine] if machine else []) + [pc for pc in pcs if pc.reachable()]
+        tall = max(1, (height - 3 - 5 * len(computers)) // (2 * max(1, len(computers))) + 1) if width >= 96 else 1
+        y = 2
+        for pc in computers:
+            if y + 5 > height - 1:
+                break
+            y = mac_box(canvas, y, width, pc, tall) if pc is machine or getattr(pc, "kind", "") == "macos" \
+                else pc_box(canvas, y, width, pc, tall)
+        if not computers:
+            canvas.put(3, 1, "No computer answers.", "dim")
+    else:
+        deck(canvas, cfg, runners, queue, machine, picked, pcs, health)
+    decode(screen, progress_of("page", 0.45))
     picking = (("field" if "field" in dialog else "dialog") if dialog else None if picked is None
                else "request" if picked < 0 else "issue" if picked >= ISSUE_ROW else "run")
     if dialog:
-        popup(canvas, dialog)
-    # Last: its keys are read while a popup is up too.
-    footer(canvas, height - 1, width, "" if dialog else note, picking)
+        popup(screen, dialog)
+    # Last: its keys are read while a question is up too.
+    footer(canvas, height - 1, width, "" if dialog else note, picking, page)
 
 
 def moving(runners, queue, pcs=()):

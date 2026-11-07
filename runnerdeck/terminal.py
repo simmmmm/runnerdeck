@@ -30,7 +30,8 @@ STYLE = {}
 # The characters that are not plain text, by what the terminal's font can show (`glyphs`):
 # --status keeps these, so that its text stays the same; the screen gets ▰▱ and braille
 # graphs, or ■ and | / - \ where the font is an old one (the Linux console, Windows' conhost).
-GLYPH = {"full": "█", "empty": "·", "spin": "", "braille": False}
+GLYPH = {"full": "█", "empty": "·", "spin": "", "braille": False, "noise": "#=/\\|_.:", "lit": "#", "unlit": ".",
+         "mark": "###", "digits": False}
 
 
 # Whether things move (spinners, the scan over a busy job's meter): off in --status and
@@ -207,53 +208,62 @@ def rich(env=None):
 
 def glyphs(env=None):
     if rich(env):
-        GLYPH.update({"full": "▰", "empty": "▱", "spin": "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", "braille": True})
+        GLYPH.update({"full": "▰", "empty": "▱", "spin": "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏", "braille": True, "noise": "▪▫░▒/\\|_",
+                      "lit": "▮", "unlit": "▯", "mark": "▐█▌", "digits": True})
     else:
-        GLYPH.update({"full": "■", "empty": "·", "spin": "|/-\\", "braille": False})
+        GLYPH.update({"full": "■", "empty": "·", "spin": "|/-\\", "braille": False, "noise": "#=/\\|_.:",
+                      "lit": "#", "unlit": ".", "mark": "###", "digits": False})
 
 
 def colours(env=None):
-    """Neon on dark: green and cyan on a near-black ground, amber and red for what is
-    warm and what is wrong. SGR's numbers; the ground is the screen's own, so that the
-    look does not depend on the terminal's theme. Where the terminal has 8 colours the
-    same names get the 8, and with none, bold and dim and reverse only. What is said is
-    never in the colour alone: the numbers, the marks and the words are there too.
-    `title` is a box's name on a ground of its own, `key` a key in the foot, `picked`
-    the chosen row; `-bad` and `-warm` are a box that holds something wrong or warm."""
+    """Black, off-white and grey, and one accent: orange, for what is chosen, busy or asks a look; red only
+    for what is wrong. SGR's numbers; the ground is the screen's own, so that the look does not depend on
+    the terminal's theme. Where the terminal has 8 colours the same names get the 8, and with none, bold
+    and dim and reverse only. What is said is never in the colour alone: the numbers, the marks and the
+    words are there too. `title` is a section's name as a chip, `band` the grey head of a section, `key` a
+    key in the foot, `picked` the chosen row; `dlg-` the orange panel of a question, `menu` a bar of a menu."""
     levels = depth(env)
     glyphs(env)
     if levels == 256:
         ground = ";48;5;233"
         STYLE.update({
-            "frame": "38;5;30", "cool": "38;5;45", "edge": "1;38;5;51", "label": "38;5;73", "plain": "38;5;253",
-            "dim": "38;5;66", "strong": "1;38;5;51", "good": "38;5;47", "warm": "38;5;214",
-            "bad": "1;38;5;203", "empty": "38;5;23", "logo": "1;38;5;51", "glitch": "38;5;41",
-            "edge-bad": "1;38;5;203", "edge-warm": "1;38;5;214",
-            "title": "1;38;5;123;48;5;23", "title-bad": "1;38;5;231;48;5;124", "title-warm": "1;38;5;16;48;5;214",
-            "key": "1;38;5;16;48;5;37", "picked": "1;38;5;231;48;5;24", "shadow": "38;5;236;48;5;232",
-            # What a popup lies over, and the popup: a ground of its own.
-            "under": "38;5;23", "pop": "38;5;253;48;5;17", "pop-strong": "1;38;5;51;48;5;17",
-            "pop-frame": "38;5;45;48;5;17", "pop-off": "38;5;253;48;5;24", "pop-on": "1;38;5;16;48;5;51",
+            "frame": "38;5;239", "cool": "38;5;245", "edge": "1;38;5;254", "label": "38;5;245", "plain": "38;5;254",
+            "dim": "38;5;241", "strong": "1;38;5;231", "good": "38;5;254", "warm": "38;5;202", "bad": "1;38;5;196",
+            "empty": "38;5;236", "logo": "1;38;5;231", "glitch": "38;5;202", "edge-bad": "1;38;5;196", "edge-warm": "1;38;5;202",
+            "title": "1;38;5;233;48;5;254", "title-bad": "1;38;5;231;48;5;196", "title-warm": "1;38;5;233;48;5;202",
+            "key": "1;38;5;233;48;5;250", "picked": "1;38;5;233;48;5;202", "shadow": "38;5;234;48;5;232",
+            "band": "38;5;245;48;5;235", "menu": "38;5;254;48;5;236", "cross": "38;5;202", "wipe": "38;5;233;48;5;202",
+            # What a question lies over, and the question: an orange panel.
+            "under": "38;5;237", "pop": "38;5;233;48;5;202", "pop-strong": "1;38;5;233;48;5;202",
+            "pop-frame": "38;5;233;48;5;202", "pop-off": "38;5;254;48;5;236", "pop-on": "1;38;5;233;48;5;202",
+            "dlg": "38;5;233;48;5;202", "dlg-strong": "1;38;5;233;48;5;202", "dlg-dim": "38;5;88;48;5;202",
+            "dlg-field": "38;5;233;48;5;166", "dlg-value": "1;38;5;233;48;5;166", "dlg-chip": "1;38;5;254;48;5;233",
+            "dlg-on": "1;38;5;231;48;5;233", "dlg-off": "38;5;233;48;5;166",
         })
         for name in STYLE:
             if "48;" not in STYLE[name]:
                 STYLE[name] += ground
-        STYLE[""] = "38;5;253" + ground
+        STYLE[""] = "38;5;254" + ground
     elif levels == 8:
         STYLE.update({
-            "frame": "36", "cool": "1;36", "edge": "1;36", "label": "36", "plain": "37", "dim": "2;37", "strong": "1;36",
-            "good": "32", "warm": "33", "bad": "1;31", "empty": "2;36", "logo": "1;36", "glitch": "32",
-            "edge-bad": "1;31", "edge-warm": "1;33", "title": "1;30;46", "title-bad": "1;37;41", "title-warm": "1;30;43",
-            "key": "30;46", "picked": "7", "shadow": "2",
-            "under": "2;36", "pop": "37;44", "pop-strong": "1;37;44", "pop-frame": "36;44", "pop-off": "37;44", "pop-on": "30;46",
+            "frame": "2;37", "cool": "37", "edge": "1;37", "label": "37", "plain": "37", "dim": "2;37", "strong": "1;37",
+            "good": "37", "warm": "33", "bad": "1;31", "empty": "2;37", "logo": "1;37", "glitch": "33",
+            "edge-bad": "1;31", "edge-warm": "1;33", "title": "30;47", "title-bad": "1;37;41", "title-warm": "30;43",
+            "key": "30;47", "picked": "30;43", "shadow": "2", "band": "37", "menu": "37", "cross": "33", "wipe": "30;43",
+            "under": "2;37", "pop": "30;43", "pop-strong": "1;30;43", "pop-frame": "30;43", "pop-off": "37", "pop-on": "30;43",
+            "dlg": "30;43", "dlg-strong": "1;30;43", "dlg-dim": "30;43", "dlg-field": "4;30;43", "dlg-value": "1;4;30;43",
+            "dlg-chip": "1;37;40", "dlg-on": "1;37;40", "dlg-off": "30;43",
         })
         STYLE[""] = ""
     else:
-        STYLE.update({name: "" for name in ("frame", "label", "plain", "good", "warm", "empty", "glitch", "cool", "pop",
-                                            "pop-frame", "shadow")})
+        STYLE.update({name: "" for name in ("frame", "label", "plain", "good", "warm", "empty", "glitch", "cool",
+                                            "shadow", "band", "menu", "cross")})
         STYLE.update({"edge": "1", "strong": "1", "logo": "1", "bad": "1", "dim": "2", "under": "2", "picked": "7",
                       "edge-bad": "1", "edge-warm": "1", "title": "1;7", "title-bad": "1;7", "title-warm": "1;7", "key": "7",
-                      "pop-strong": "1", "pop-off": "", "pop-on": "7"})
+                      "pop": "7", "pop-strong": "1;7", "pop-frame": "7", "pop-off": "", "pop-on": "7", "wipe": "7",
+                      # The panel reversed; the answer Enter takes bold and not reversed, and marked with ▸.
+                      "dlg": "7", "dlg-strong": "1;7", "dlg-dim": "7", "dlg-field": "4;7", "dlg-value": "1;4;7",
+                      "dlg-chip": "1", "dlg-on": "1", "dlg-off": "7"})
         STYLE[""] = ""
 
 
@@ -268,28 +278,15 @@ def spin(still):
 
 
 def frame(canvas, y, x, height, width, title, right="", tone=None):
-    """A box with rounded corners, its title in the top edge on a ground of its own, as btop's;
-    ticks on the foot like a ruler. `tone` ("bad", "warm") colours the corners and the title
-    of a box that holds something wrong: the marks in it say what."""
-    edge = f"edge-{tone}" if tone else "edge"
-    canvas.put(y, x, "╭", edge)
-    canvas.put(y, x + 1, "─", "frame")
-    canvas.put(y, x + 2, f" {title} ", f"title-{tone}" if tone else "title")
-    start = x + 4 + len(title)
-    end = x + width - 1 - (len(right) + 3 if right else 0)
-    canvas.put(y, start, "─" * max(0, end - start), "frame")
+    """A section: no box, but a grey band with the name as a chip and what is to be said of it at its right,
+    the sides open, a + at the foot's corners. `tone` ("bad", "warm") colours the chip of a section that holds
+    something wrong: the marks in it say what."""
+    canvas.put(y, x, " " * width, "band")
+    canvas.put(y, x + 1, f" {title} ", f"title-{tone}" if tone else "title")
     if right:
-        canvas.put(y, end, f" {right} ", "label")
-        canvas.put(y, x + width - 2, "─", "frame")
-    canvas.put(y, x + width - 1, "╮", edge)
-    for row in range(y + 1, y + height - 1):
-        canvas.put(row, x, "│", "frame")
-        canvas.put(row, x + width - 1, "│", "frame")
-    canvas.put(y + height - 1, x, "╰" + "─" * max(0, width - 2) + "╯", "frame")
-    for tick in range(x + 10, x + width - 3, 10):
-        canvas.put(y + height - 1, tick, "┴", "frame")
-    canvas.put(y + height - 1, x, "╰", edge)
-    canvas.put(y + height - 1, x + width - 1, "╯", edge)
+        canvas.put(y, x + width - 2 - len(right), right, "band")
+    canvas.put(y + height - 1, x, "+", "frame")
+    canvas.put(y + height - 1, x + width - 1, "+", "frame")
 
 
 def meter(canvas, y, x, width, share, style=None, scan=False):
@@ -352,38 +349,114 @@ def right(canvas, y, width, text, style):
     canvas.put(y, width - 2 - len(text), text, style)
 
 
-def popup(canvas, dialog):
-    """btop's way of asking: the screen pushed back, and a box of its own over
-    it with its two answers; n, the safe one, is where it starts. A shadow under it."""
-    words = dialog["words"]
-    width = min(max(len(words) + 8, 44), canvas.width - 2)
-    height = 8
-    x, y = (canvas.width - width) // 2, max(0, (canvas.height - height) // 2)
-    canvas.dim()
-    if hasattr(canvas, "shade"):
-        for row in range(y + 1, y + height + 1):
-            canvas.shade(row, x + width, 2 if row < y + height else 0)
-        canvas.shade(y + height, x + 2, width)
-    for row in range(y, y + height):
-        canvas.put(row, x, " " * width, "pop")
-    title = f" {dialog['title']} "
-    canvas.put(y, x, "╭─", "pop-frame")
-    canvas.put(y, x + 2, title, "pop-on")
-    canvas.put(y, x + 2 + len(title), "─" * max(0, width - 3 - len(title)) + "╮", "pop-frame")
-    for row in range(y + 1, y + height - 1):
-        canvas.put(row, x, "│", "pop-frame")
-        canvas.put(row, x + width - 1, "│", "pop-frame")
-    canvas.put(y + height - 1, x, "╰" + "─" * max(0, width - 2) + "╯", "pop-frame")
-    canvas.put(y + 2, x + (width - len(words)) // 2, words[:width - 4], "pop-strong")
-    if "field" in dialog:
-        # What is typed or pasted, hidden but for how long it is.
-        shown = ("●" * len(dialog["field"]))[-(width - 8):]
-        canvas.put(y + 4, x + 3, "› " + shown + "▏", "pop")
-        canvas.put(y + 6, x + 3, "enter: set up · empty: ask gh · esc: cancel"[:width - 6], "pop-frame")
+# What moves, by the clock: when it began, and until when the screen is drawn quickly. Off where MOTION is.
+ANIM = {"page": 0.0, "dialog": None, "dialog_at": 0.0, "view": None, "view_at": 0.0, "until": 0.0}
+
+
+def ease(share):
+    share = max(0.0, min(1.0, share))
+    return 1 - (1 - share) ** 3
+
+
+def progress(name, seconds):
+    """How far an animation is, 0 to 1; always 1 where nothing moves."""
+    return min(1.0, (time.time() - ANIM[name]) / seconds) if MOTION[0] else 1.0
+
+
+def start(name, seconds):
+    ANIM[name] = time.time()
+    ANIM["until"] = max(ANIM["until"], time.time() + seconds)
+
+
+def animating():
+    return MOTION[0] and time.time() < ANIM["until"]
+
+
+def decode(screen, share):
+    """A page that is opened comes out of noise: below a line that runs down there is noise, on the line
+    the text bright. The head and the foot stay."""
+    if share >= 1 or not hasattr(screen, "rows"):
         return
-    # Which one Enter takes, in the words too and not only in the colour.
-    yes = f" ▸ {dialog['yes']} " if dialog["focus"] else f"   {dialog['yes']} "
-    no = f"   {dialog['no']} " if dialog["focus"] else f" ▸ {dialog['no']} "
-    start = x + (width - len(yes) - len(no) - 2) // 2
-    canvas.put(y + 5, start, yes, "pop-on" if dialog["focus"] else "pop-off")
-    canvas.put(y + 5, start + len(yes) + 2, no, "pop-off" if dialog["focus"] else "pop-on")
+    import random
+    rng = random.Random(int(time.time() * 30))
+    line = 2 + int(ease(share) * (screen.height - 3))
+    for y in range(line, screen.height - 2):
+        row = screen.rows[y]
+        for x, (character, style) in enumerate(row):
+            if character != " ":
+                row[x] = (rng.choice(GLYPH["noise"]) if rng.random() < 0.6 else " ", "dim" if y > line else "strong")
+
+
+class Inset:
+    """The screen with a margin all round: a row at the top and the foot, two columns at the sides. What is
+    drawn past its edge is cut, as on the screen itself."""
+
+    def __init__(self, canvas, top=1, left=2, bottom=1, right=2):
+        self.canvas, self.top, self.left = canvas, top, left
+        self.height, self.width = canvas.height - top - bottom, canvas.width - left - right
+
+    def put(self, y, x, text, style=""):
+        if 0 <= y < self.height:
+            if x < 0:
+                text, x = text[-x:], 0
+            self.canvas.put(y + self.top, x + self.left, text[:max(0, self.width - x)], style)
+
+    def __getattr__(self, name):
+        return getattr(self.canvas, name)
+
+
+NAME = "RUNNERDECK"
+
+
+def panel(canvas, title, share=1.0, wide=False):
+    """The stage of a question: on the left a crosshair and the steps stacked down the side, over the right an
+    orange panel that slides in (`share` of the way), the name down its edge on a black strip, the title as a
+    black chip. Where its content goes: (x, width, bottom)."""
+    width, height = canvas.width, canvas.height
+    # A question of the setup has more to say than a yes or no: its panel is wider.
+    size = min(width - 8, max(64, int(width * 0.62)) if wide else max(46, int(width * 0.44)))
+    x0, bottom = width - size + int((1 - ease(share)) * size), height - 1
+    cy, cx = bottom // 2, (width - size) // 2
+    for row, (mark, clear) in enumerate((("╷", "     "), ("╶─┼─╴", "       "), ("╵", "     ")), start=-1):
+        canvas.put(cy + row, cx - len(clear) // 2, clear, "")
+        canvas.put(cy + row, cx - len(mark) // 2, mark, "cross")
+    steps = "QUEUE ↓ RUN ↓ SHIP"
+    for at, character in enumerate(steps if bottom > len(steps) + 2 else ""):
+        canvas.put((bottom - len(steps)) // 2 + at, 0, "    ", "")
+        canvas.put((bottom - len(steps)) // 2 + at, 2, character, "label")
+    for row in range(bottom):
+        canvas.put(row, x0, "   ", "dlg-chip")
+        canvas.put(row, x0 + 3, " " * (size - 3), "dlg")
+    gap = max(1, (bottom - 2) // len(NAME))
+    for at, letter in enumerate(NAME if gap > 1 else ""):
+        canvas.put(1 + at * gap, x0 + 1, letter, "dlg-on")
+    canvas.put(1, x0 + 6, f" {title.upper().replace(' · ', '_').replace(' ', '_')} "[:size - 12], "dlg-chip")
+    canvas.put(1, x0 + size - 5, GLYPH["lit"] * 3, "dlg-dim")
+    return x0 + 6, size - 10, bottom
+
+
+def popup(canvas, dialog):
+    """A question as a login screen: the screen pushed back, the orange panel over the right, the question
+    as a labelled field, the answers as two full-width buttons one over the other, the one Enter takes black
+    and marked with ▸ (↑↓ and ←→ choose). For a token: the field, hidden but for how long it is."""
+    import textwrap
+    canvas.dim()
+    if ANIM["dialog"] != id(dialog):
+        ANIM["dialog"] = id(dialog)
+        start("dialog_at", 0.35)
+    x, w, bottom = panel(canvas, dialog["title"], progress("dialog_at", 0.3))
+    lines = textwrap.wrap(dialog["words"], w - 2) or [""]
+    field = "field" in dialog
+    y = max(3, (bottom - (len(lines) + 7)) // 2)
+    canvas.put(y, x, " TOKEN " if field else " QUESTION ", "dlg-chip")
+    for at, line in enumerate(lines):
+        canvas.put(y + 1 + at, x, " " * w, "dlg-field")
+        canvas.put(y + 1 + at, x + 1, line, "dlg-field" if field else "dlg-value")
+    y += 2 + len(lines)
+    if field:
+        canvas.put(y, x, " " * w, "dlg-field")
+        canvas.put(y, x + 1, ("●" * len(dialog["field"]))[-(w - 3):] + "▏", "dlg-field")
+        canvas.put(y + 2, x, "enter: set up · empty: ask gh · esc: cancel"[:w], "dlg-dim")
+        return
+    for at, (label, on) in enumerate(((dialog["yes"], dialog["focus"]), (dialog["no"], not dialog["focus"]))):
+        canvas.put(y + at * 2, x, (("▸ " if on else "") + label.upper()).center(w), "dlg-on" if on else "dlg-off")

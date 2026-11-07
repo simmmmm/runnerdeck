@@ -32,7 +32,7 @@ Press `w` on the main screen. The list of workflows opens again, and the ones th
 
 The program starts the workflow only in these cases:
 
-- You say yes in the box.
+- You say yes on the screen (the section WAITING FOR YOU, on the first page).
 - The branch is still at the commit in the title.
 - No run of this commit is on its way.
 

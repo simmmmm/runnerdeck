@@ -190,7 +190,8 @@ class Queue:
         # When GitHub last answered: the screen says how old the list is.
         self.at = time.time()
         runs.sort(key=lambda run: run.get("createdAt", ""), reverse=True)
-        self.runs = runs[:6]
+        # Enough for the RUNS page; the deck shows as many as fit.
+        self.runs = runs[:20]
         # Cancelling lasts until GitHub says the run is over.
         for run in runs:
             if run.get("status") == "completed" and self.working.get(run["databaseId"]) == "cancelling":
@@ -251,3 +252,29 @@ class Queue:
         while True:
             self.fetch()
             time.sleep(20)
+
+
+DETAIL = {}
+
+
+def run_detail(run):
+    """The jobs and steps of a run (and its title and event), asked of gh in the background: None while it is
+    asked, {} where gh could not say. Asked again when the run's status changes, and every ten seconds while
+    it goes on, so that its steps move."""
+    key = (run["databaseId"], run.get("status"))
+    entry = DETAIL.get(key)
+    again = entry and run.get("status") != "completed" and not entry["asking"] and time.time() - entry["at"] > 10
+    if entry is None or again:
+        entry = DETAIL.setdefault(key, {"value": None})
+        entry.update(at=time.time(), asking=True)
+
+        def ask():
+            try:
+                got = subprocess.run(["gh", "run", "view", str(run["databaseId"]), "--repo", run.get("repo", ""),
+                                      "--json", "jobs,event,displayTitle"], capture_output=True, text=True, timeout=20)
+                entry["value"] = json.loads(got.stdout) if got.returncode == 0 else (entry["value"] or {})
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                entry["value"] = entry["value"] or {}
+            entry["asking"] = False
+        threading.Thread(target=ask, daemon=True).start()
+    return entry["value"]
