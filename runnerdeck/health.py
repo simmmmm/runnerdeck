@@ -232,7 +232,7 @@ def health_box(canvas, y, width, health, picked=None, now=None):
     whether it is flaky), the free disk, the last good Smoke, what waits too long, and the open issues."""
     now = now or time.time()
     conf = health.conf
-    frame(canvas, y, 0, height_of(health), width, "health", health.words(now)[0])
+    frame(canvas, y, 0, height_of(health), width, "HEALTH", health.words(now)[0])
     labels = {repo: repo.split("/")[-1][:14] for repo in health.repos}
     at, line = 16, y + 1
     for repo, found in health.repos.items():

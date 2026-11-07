@@ -3,20 +3,34 @@
 **One screen in your terminal for your GitHub Actions runners, your machines, and your workflow runs.**
 
 ```
- ◐ runnerdeck ▓▒░                                           update ready · u   awake   16:38:27
-╭─ desk ──────────────────────────────────────────────────────── here · load 4.8 · 16 threads ─╮
-│ CPU  ▅▄▄▄▄▅▄▄▄▄▃▄▃▄▅▅▅▅▅▅▆▆▇▇▆▅▅▅▆▇▆▅   62 %   Heat     CPU 71 °C   GPU 58 °C                │
-│ GPU  ▄▄▄▄▃▃▃▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁   37 %   VRAM     8.2 / 16 GB                          │
-│ RAM  ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱  22.2 / 30 GB     Busy     cargo 48 %   WorldOfWarship 6 %      │
-╰─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴────╯
-╭─ runners ────────────────────────────────────────────────────────────────────── 1 of 2 busy ─╮
-│ ⠋ box    Running build                                                                 4 min │
-│          ▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱  step 3 of 5 · cargo build --release                   ~5 min left │
-│ ○ box-2  Listening · last build succeeded                                             12 min │
-╰─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴────╯
+ RUNNERDECK ▮▮▮  DECK_OVERVIEW    awake        1 DECK ▸   2 RUNS ▸   3 LOGS ▸   4 MACHINES ▸    16:38:27
+
+ NEEDS_YOU   ■ CI red on main · app · 12 min · ↑↓ then l for its log
+
+ BUSY          RED               RUNNERS    COMPUTER  STATE                                 1 of 2 busy
+  ┓   ╱┏━┓      ┓               ● box       desk      ▰▰▰▰▰▱▱▱▱▱▱▱ step 3 of 5 · cargo build --r  4 min
+  ┃  ╱ ┏━┛      ┃               ○ box-2     desk      Listening · last build succeeded           12 min
+  ┻ ╱  ┗━━      ┻
+                                 MACHINES      CPU              GPU    RAM                   HEAT/POWER
+ WAITING       RUNS              desk          ····▃▄▅▅▆▅  62%   37%   ▰▰▰▰▰▰▰▱▱▱ 22/30 GB   71 °C
+ ┏━┓           ┏━━
+ ┃ ┃           ┗━┓
+ ┗━┛           ━━┛
+
+
+  RUNS                                                                 owner/app, owner/site · 8 s ago
+  … Build        main     4f1c2a9 app  on box                                      in progress · 4 min
+  ✗ CI           main     4f1c2a9 app                                                 failure · 12 min
+  ✓ CI           main     4f1c2a9 app                                                 success · 31 min
+  ✓ Deploy       main     4f1c2a9 site                                                success · 58 min
+  ✓ CI           main     4f1c2a9 site                                            success · 1 h 15 min
++                                                                                                      +
+
+ TOTAL  5 RUNS · 2 REPOSITORIES · 2 RUNNERS
+ ↑↓ choose   m settings   s start   x stop   1-4 pages   q quit, runners stay on
 ```
 
-*Example screen. The numbers are made up.*
+*Example of the first page, as `--status` prints it. The numbers are made up. On the terminal the screen is black, grey and orange.*
 
 ## What it does
 
@@ -49,18 +63,25 @@ To ask the questions again, use `--setup`. The config file is plain text. It lis
 
 ## The look
 
-The screen is neon green and cyan on a dark ground. Amber means warm. Red means wrong. The colour is never the only sign: the numbers, the marks (✓ ✗ …), and the words are there too.
+The screen is black, off-white and grey, with one accent: orange. Orange is what is chosen, what is busy, and what asks for a look. Red means wrong. The colour is never the only sign: the numbers, the marks (✓ ✗ ▸ …), and the words are there too.
 
-- Each box has its name on a ground of its own. A box that holds something wrong (a failed run, a runner whose last job failed) has red corners and a red name.
-- The keys at the foot are on a ground of their own, so you can find them quickly.
-- A busy runner, a run that goes on, and a build that runs have a spinner. A light runs over the meter of a busy job. The time in the head moves each second. Then you know that the screen is live.
-- The github box says how old the list is (`8 s ago`). After two minutes without an answer it says `stale`. Before the first answer, it says that it asks GitHub.
-- On a tall terminal (about 42 rows for one machine, 6 more for each other machine), the CPU and GPU graphs are two rows high, in braille dots.
-- When you start the program, a short opening shows the logo. It takes about one second. Press any key to skip it. To turn it off, use `--no-intro` or set `RUNNERDECK_NO_INTRO=1`. `--status` has no opening.
-- Nothing moves with `RUNNERDECK_CALM=1`: no opening, no spinners. The screen is then drawn one time each second. When something moves, it is drawn four times each second.
-- A terminal with 8 colours (the Linux console, for example) gets 8 colours. With `NO_COLOR` set, or in a terminal that says it has no colours, the screen uses bold, dim, and reverse only, and nothing moves.
-- The Linux console and the old Windows console (not Windows Terminal) get simpler marks: `■` and `·` in the meters, `|/-\` as the spinner, and no braille.
-- The screen needs 80 columns. The opening needs 44 columns and 11 rows. On a smaller terminal it does not show.
+- The screen has four pages. Press `1` to `4`, or see the chips at the top right:
+  - **1 DECK**: what needs you, every runner on every computer, each computer in one line, and the last runs. Four big numbers at the left: busy runners, red workflows, requests that wait, runs.
+  - **2 RUNS**: the runs as a list. At the right, the chosen run: its result, what it is of, and its jobs and steps. The step that failed is red.
+  - **3 LOGS**: the log of a runner, over the whole page. `←` `→` switch to another runner.
+  - **4 MACHINES**: CPU and GPU as graphs, memory, heat, power, as high as the terminal lets them be.
+- A section has its name on a chip in a grey band. A section that holds something wrong has a red chip.
+- `NEEDS_YOU` on the first page says what asks for you: a red workflow, a computer that does not answer, a runner that is stopped. A request that waits for your yes has its own section, which never gives way.
+- A question (leave, cancel, stop, a token) comes in as an orange panel at the right. The answer that Enter gives is black and has `▸`.
+- The settings (`m`) are a list of bars. The setup's questions use the orange panel too.
+- Things move: a page comes out of noise when you open it, the big numbers count up, a question slides in, the bars of the settings slide in, and an orange wipe goes over the screen when it starts and when it leaves. A busy runner, a run that goes on, and a build that runs have a spinner. The time in the head moves each second. Then you know that the screen is live.
+- The runs say how old the list is (`8 s ago`). After two minutes without an answer it says `stale`. Before the first answer, it says that it asks GitHub.
+- When you start the program, a short opening shows the sign and the name. It takes about one and a half seconds. Press any key to skip it. To turn it off, use `--no-intro` or set `RUNNERDECK_NO_INTRO=1`. `--status` has no opening.
+- Nothing moves with `RUNNERDECK_CALM=1`: no opening, no animations, no spinners. The screen is then drawn one time each second. When something moves, it is drawn four times each second, and quickly while a page or a question comes in.
+- A terminal with 8 colours (the Linux console, for example) gets 8 colours: yellow is the accent there. With `NO_COLOR` set, or in a terminal that says it has no colours, the screen uses bold, dim, underline and reverse only, and nothing moves.
+- The Linux console and the old Windows console (not Windows Terminal) get simpler marks: `■` and `·` in the meters, `|/-\` as the spinner, `#` in the sign, no braille, and the big numbers in one row.
+- The screen needs 80 columns. Under 100 columns the big numbers go, and the head shows only the numbers of the pages. The opening needs 48 columns and 15 rows. On a smaller terminal it does not show.
+- `--status` prints the first page as text.
 
 ## Example
 
@@ -90,8 +111,9 @@ service = actions-runner.service
 | `w` | Choose again which workflows wait for your yes (also in the settings). |
 | `h` | Add a computer to watch over SSH (also in the settings). |
 | `s` / `x` | Start / stop the runners. |
-| `←` `→` or `Tab` | Switch to the log of another runner. All runners are tabs above the log. |
-| `↑` `↓` | Choose a run. |
+| `1` `2` `3` `4` | The pages: DECK, RUNS, LOGS, MACHINES. |
+| `←` `→` or `Tab` | Switch to the log of another runner (page 3). All runners are tabs above the log. |
+| `↑` `↓` | Choose a run, a request, or an issue. Only on the pages that show them: DECK (all three) and RUNS (runs). |
 | `c` `r` `o` | Cancel, repeat, or open the chosen run. `o` opens a chosen issue of the health box too. |
 | `←` `→` or `↑` `↓` in a question | Choose the answer. Enter gives it. |
 | `←` `→`, `Home`, `End` in a text field | Move the cursor. What you type goes there. A list of repositories is not cleared when you type: what you type goes where the cursor is. |

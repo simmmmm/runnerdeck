@@ -1,6 +1,6 @@
 # Health
 
-The health box tells you at a glance if your CI is well. It is off. It starts when the config has a `[health]` section.
+The health section, on the first page (DECK), tells you at a glance if your CI is well. It is off. It starts when the config has a `[health]` section.
 
 ## Config
 
@@ -49,7 +49,7 @@ Then, in the box:
 - **Queued**: runs that wait longer than `queued_min`. A push waits when the PC with the runner is off.
 - **The issues** with the label, the newest first, four at most.
 
-If the screen is too short, the box is left out. The word in the head stays.
+If the screen is too short, the section is left out. The word in the head stays. The runs give way first.
 
 ## Keys
 

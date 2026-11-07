@@ -96,7 +96,7 @@ count = 3
 
 The Mac is sent a small Python program over SSH, and runs it with its own `python3`. The program only reads. It uses the same tools that runnerdeck uses on its own Mac (`top`, `vm_stat`, `ioreg`), and it reads the log files of the runners. Nothing is installed on the Mac. The runners are shown but not started or stopped: for that, open runnerdeck on the Mac itself (`ssh -t mac runnerdeck`).
 
-Use an SSH key. The program never asks for a password. If the PC does not answer, the box says so.
+Use an SSH key. The program never asks for a password. If the PC does not answer, `NEEDS_YOU` on the first page says so.
 
 ### 4. Watch two repositories
 
