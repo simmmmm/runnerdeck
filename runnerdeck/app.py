@@ -222,9 +222,9 @@ def show(window, cfg, runners, queue, machine, pcs=(), health=None):
             # Each arrow to its own side: both flipping it, → on the answer
             # already chosen chose the other, and a run was cancelled that
             # was meant to go on.
-            if key == K_LEFT:
+            if key in (K_LEFT, K_UP):
                 dialog["focus"] = True
-            elif key == K_RIGHT:
+            elif key in (K_RIGHT, K_DOWN):
                 dialog["focus"] = False
             elif key == 9:
                 dialog["focus"] = not dialog["focus"]

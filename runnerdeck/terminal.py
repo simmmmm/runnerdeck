@@ -15,6 +15,7 @@ if WINDOWS:
     import msvcrt
 # curses' own numbers for the keys the screen uses, so that Windows says the same.
 K_DOWN, K_UP, K_LEFT, K_RIGHT, K_BACKSPACE, K_ENTER, K_RESIZE = 258, 259, 260, 261, 263, 343, 410
+K_HOME, K_END, K_DELETE = 262, 360, 330
 
 
 # curses' own numbers for the keys the screen uses, so that Windows says the same.
@@ -124,7 +125,7 @@ class ConsoleTerminal:
             if msvcrt.kbhit():
                 character = msvcrt.getwch()
                 if character in ("\x00", "\xe0"):
-                    return {"H": K_UP, "P": K_DOWN, "K": K_LEFT, "M": K_RIGHT}.get(msvcrt.getwch(), 0)
+                    return {"H": K_UP, "P": K_DOWN, "K": K_LEFT, "M": K_RIGHT, "G": K_HOME, "O": K_END, "S": K_DELETE}.get(msvcrt.getwch(), 0)
                 return ord("q") if character == "\x03" else ord(character)
             if self.shape is not None and self.size() != self.shape:
                 self.shape = self.size()
