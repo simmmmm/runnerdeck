@@ -1973,6 +1973,34 @@ from runnerdeck.boxes import head_why
 assert head_why("It answers, but does not accept a key. add yours once, with the password of me@pc: ssh-copy-id me@pc") == "key refused, run: ssh-copy-id me@pc"
 assert head_why("No answer. Check the address.") == "No answer"
 
+# RUNS: a run that goes on shows what its job prints now, under its steps, from the runner's own folder
+from runnerdeck import github as _github
+from runnerdeck.runners import Runner as _Runner
+with tempfile.TemporaryDirectory() as tmp:
+    _here = _Runner(types.SimpleNamespace(local={"name": "box", "dir": tmp}), 1)
+    _going = dict(a_run("o/alpha", 9), status="in_progress", conclusion="")
+    _github.DETAIL[(9, "in_progress")] = {"value": {"jobs": [{"name": "ship", "status": "in_progress", "steps": [
+        {"name": "Set up job", "conclusion": "success"}, {"name": "publish", "status": "in_progress"}]}]}, "at": time.time(), "asking": False}
+    _github.DETAIL[(8, "completed")] = {"value": {"jobs": []}, "at": time.time(), "asking": False}
+
+    def _runs_page(on, runs=(_going,)):
+        grid = terminal.Grid(30, 120)
+        queue = types.SimpleNamespace(runs=list(runs), requests=[], problem="", jobs={}, working={}, said="", on=on)
+        boxes.paint(grid, configured("[deck]\nrepos = o/alpha\n"), [_here], queue, None, 0, "", picked=runs[0]["databaseId"], page=2)
+        return grid.text()
+
+    assert _here.live() is None and "nothing printed yet" in _runs_page({9: "box"})      # no page yet: one line, no failure
+    os.makedirs(os.path.join(tmp, "_diag", "pages"))
+    with open(os.path.join(tmp, "_diag", "pages", "a_b_1.log"), "wb") as file:
+        file.write("\ufeff2026-11-13T21:17:40.1068008Z \x1b[1mNuma everywhere\x1b[0m\r\n2026-11-13T21:17:41.1Z 10%\r90%\n2026-11-13T21:17:42Z cut by the bl".encode())
+    assert _here.live()[-1].endswith("90%"), _here.live()                                 # the line a block's end cut is not shown yet
+    text = _runs_page({9: "box"})
+    assert "LIVE" in text and "Numa everywhere" in text and "90%" in text, text
+    assert "2026-11-13T21" not in text and "10%" not in text and "cut by" not in text and "\x1b" not in text, text
+    assert "not on this computer" in _runs_page({9: "mac-2"}) and "Numa everywhere" not in _runs_page({9: "mac-2"})
+    assert "LIVE" not in _runs_page({9: "waiting for linux"}) and "LIVE" not in _runs_page({})   # not on a runner yet: nothing said
+    assert "LIVE" not in _runs_page({8: "box"}, [a_run("o/alpha", 8)])                    # a run that is over: as it was
+
 import shutil as _shutil
 _shutil.rmtree(os.environ["RUNNERDECK_DATA"], ignore_errors=True)
 print("ok")

@@ -34,7 +34,7 @@
 
 - Every runner, on every computer: what it runs and how far it is.
 - CPU, GPU, memory and heat, here and on a second computer over SSH.
-- The last runs of your repositories. Cancel, repeat or open one.
+- The last runs of your repositories. Cancel, repeat or open one. A run that goes on this computer shows what it prints, live, on RUNS.
 - What is red, what is flaky, what waits for your yes. See [Health](docs/health.md) and [Approval](docs/approval.md).
 - A new runner: you paste the token.
 - Builds outside GitHub: `runnerdeck run -- <command>`. See [Builds](docs/builds.md).

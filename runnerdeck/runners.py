@@ -49,6 +49,22 @@ class Runner:
         except OSError:
             return []
 
+    def live(self, size=16384):
+        """What the job that runs now has printed so far. GitHub gives no log of a job before it ends;
+        the runner keeps each step's output in _diag/pages until then, and writes it there in blocks.
+        The lines of the newest page that has any, or None where there is none."""
+        try:
+            pages = [page for page in glob.glob(os.path.join(self.dir, "_diag", "pages", "*.log")) if os.path.getsize(page)]
+            if not pages:
+                return None
+            with open(max(pages, key=os.path.getmtime), "rb") as page:
+                page.seek(0, os.SEEK_END)
+                page.seek(max(0, page.tell() - size))
+                # The last piece is a line cut by the block's end, or nothing.
+                return page.read().decode("utf-8", "replace").split("\n")[:-1]
+        except OSError:
+            return None
+
     def finished(self):
         """The jobs its log says ended: (when, job, result)."""
         ended = []

@@ -2,7 +2,7 @@
 import os
 import re
 import time
-from .util import STAMP, ago, moment
+from .util import STAMP, ago, clean, moment
 from .builds import recent as recent_builds
 from .system import alive
 from .github import row_of, run_detail
@@ -578,9 +578,36 @@ def took(step):
         return ""
 
 
-def manifest(canvas, cfg, queue, picked):
+LIVE_STAMP = re.compile(r"^\ufeff?\d{4}-\d\d-\d\dT[\d:.]+Z ?")
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def live_log(canvas, y, x, width, height, on, runners):
+    """Under the steps of a run that goes on: what its job prints now, the newest lines at the foot, read
+    from the runner's own folder. One line instead where the runner is not on this computer, or has
+    nothing written yet. The colours of the job are not drawn; what it made bold is."""
+    runner = next((runner for runner in runners if runner.name in on.split(", ")), None)
+    lines = runner.live() if runner else None
+    canvas.put(y, x + 1, "LIVE", "label")
+    if lines is None:
+        canvas.put(y, x + 10, ("nothing printed yet" if runner else "the job is not on this computer: no live log here")[:width - 11], "dim")
+        return
+    canvas.put(y, x + 10, runner.name[:width - 11], "plain")
+    shown = []
+    for raw in lines:
+        # A line that was drawn over itself (a progress bar) is its last state.
+        said = LIVE_STAMP.sub("", raw).rstrip("\r").split("\r")[-1]
+        text = clean(ANSI.sub("", said).expandtabs(4)).rstrip()
+        if text:
+            shown.append((text, "bad" if text.startswith("##[error]") else "strong" if "\x1b[1m" in said else "plain"))
+    for at, (text, style) in enumerate(shown[-(height - 1):], start=y + 1):
+        canvas.put(at, x + 1, text[:width - 2], style)
+
+
+def manifest(canvas, cfg, queue, picked, runners=()):
     """The runs as a list at the left; at the right the chosen one: its result as a tag, its name, what it is
-    of, and its jobs and steps as a trace, the one that failed or runs in the middle."""
+    of, and its jobs and steps as a trace, the one that failed or runs in the middle; and under them, while
+    it goes on, what its job prints."""
     width, height = canvas.width, canvas.height
     runs = queue.runs or []
     if queue.runs is None and not queue.problem:
@@ -640,6 +667,11 @@ def manifest(canvas, cfg, queue, picked):
     room = height - 2 - line
     if room <= 0 or not trace:
         return
+    # Which runner has it, once GitHub has said so: the live log needs half of the room then.
+    on = (getattr(queue, "on", None) or {}).get(chosen["databaseId"], "")
+    live = chosen.get("status") == "in_progress" and on and not on.startswith("waiting for") and room >= 8
+    if live:
+        room //= 2
     stuck = next((at for at, item in enumerate(trace) if item[2] not in ("success", "skipped", "completed")), len(trace) - 1)
     first = max(0, min(stuck - room // 2, len(trace) - room))
     for kind, name, state, length in trace[first:first + room]:
@@ -652,6 +684,8 @@ def manifest(canvas, cfg, queue, picked):
             canvas.put(line, x + 4, name[:w - 14], "bad" if state in FAILED else "plain" if state == "success" else "dim")
         canvas.put(line, x + w - 1 - len(length), length, "label")
         line += 1
+    if live and height - 2 - line >= 3:
+        live_log(canvas, line + 1, x, w, height - 3 - line, on, runners)
 
 
 def head(canvas, cfg, runners, queue, health, page):
@@ -709,7 +743,7 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
     width, height = canvas.width, canvas.height
     head(canvas, cfg, runners, queue, health, page)
     if page == 2:
-        manifest(canvas, cfg, queue, picked)
+        manifest(canvas, cfg, queue, picked, runners)
     elif page == 3:
         logs = with_remote(runners, pcs)
         if logs and height >= 6:
