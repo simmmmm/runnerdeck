@@ -3,6 +3,7 @@ import os
 import re
 import time
 from .util import STAMP, ago, clean, moment
+from .builds import BUILD_ROW, as_runs, printed
 from .builds import recent as recent_builds
 from .system import alive
 from .github import row_of, run_detail
@@ -348,11 +349,12 @@ def footer(canvas, y, width, note, picking=None, page=1):
     general = (("m", "settings"), ("s", "start"), ("x", "stop"), ("1-4", "pages"), ("q", leave))
     keys = {"run": (("↑↓", "choose"), ("c", "cancel"), ("r", "run again"), ("l", "log"), ("o", "open"), ("esc", "back")) + general,
             "issue": (("↑↓", "choose"), ("o", "open"), ("esc", "back")) + general,
+            "build": (("↑↓", "choose"), ("esc", "back")) + general,
             "request": (("↑↓", "choose"), ("enter", "start"), ("d", "decline"), ("esc", "back")) + general,
             "dialog": (("y", "yes"), ("n", "no"), ("↑↓", "choose"), ("enter", "answer")),
             "field": (("enter", "set up"), ("esc", "cancel")),
             None: ((("↑↓", "choose"),) if page in (1, 2) else (("←→", "other log"),) if page == 3 else ()) + general}[picking]
-    must = {"↑↓", "←→", "esc", "q"} if picking in ("run", "request", "issue", None) else {key for key, _ in keys}
+    must = {"↑↓", "←→", "esc", "q"} if picking in ("run", "request", "issue", "build", None) else {key for key, _ in keys}
     used = sum(len(k) + len(w) + 4 for k, w in keys if k in must)
     shown = []
     for key, words in keys:
@@ -596,6 +598,11 @@ def live_log(canvas, y, x, width, height, on, runners):
         canvas.put(y, x + 10, ("nothing printed yet" if runner else "the job is not on this computer: no live log here")[:width - 11], "dim")
         return
     canvas.put(y, x + 10, runner.name[:width - 11], "plain")
+    put_log(canvas, y + 1, x, width, height - 1, lines)
+
+
+def put_log(canvas, y, x, width, height, lines):
+    """The newest of the lines a job or a build printed, as many as fit, the last at the foot."""
     shown = []
     for raw in lines:
         # A line that was drawn over itself (a progress bar) is its last state.
@@ -603,8 +610,14 @@ def live_log(canvas, y, x, width, height, on, runners):
         text = clean(ANSI.sub("", said).expandtabs(4)).rstrip()
         if text:
             shown.append((text, "bad" if text.startswith("##[error]") else "strong" if "\x1b[1m" in said else "plain"))
-    for at, (text, style) in enumerate(shown[-(height - 1):], start=y + 1):
+    for at, (text, style) in enumerate(shown[-height:] if height > 0 else [], start=y):
         canvas.put(at, x + 1, text[:width - 2], style)
+
+
+def listed(queue):
+    """What the RUNS page lists: GitHub's runs, and among them the builds of this computer that did not go
+    through GitHub, the newest first."""
+    return sorted([*(queue.runs or []), *as_runs()], key=lambda run: run.get("createdAt", ""), reverse=True)
 
 
 def manifest(canvas, cfg, queue, picked, runners=()):
@@ -612,17 +625,17 @@ def manifest(canvas, cfg, queue, picked, runners=()):
     of, and its jobs and steps as a trace, the one that failed or runs in the middle; and under them, while
     it goes on, what its job prints."""
     width, height = canvas.width, canvas.height
-    runs = queue.runs or []
     if queue.runs is None and not queue.problem:
         loading(canvas, height // 2 - 1, width, "RETRIEVING RUNS FROM GITHUB")
         return
+    runs = listed(queue)
     left = min(58, width // 2)
     labels = repo_labels(cfg.repos)
     # The repository's column only where there is room for it and a workflow's name.
     repo_at = left - 38 if left >= 50 else None
     name_w = (repo_at or left - 24) - 4
     band(canvas, 2, 0, left, "RUNS", (((repo_at, "REPO"),) if repo_at else ()) + ((left - 24, "RESULT"),), "AGE")
-    chosen = next((run for run in runs if run.get("databaseId") == picked), runs[0] if runs else None)
+    chosen = next((run for run in runs if row_of(run) == picked), runs[0] if runs else None)
     for line, run in enumerate(runs[:height - 5], start=3):
         conclusion = run.get("conclusion") or (run.get("status") or "").replace("_", " ")
         style = "picked" if run is chosen and picked is not None else None
@@ -632,7 +645,7 @@ def manifest(canvas, cfg, queue, picked, runners=()):
                    style or {"success": "good"}.get(conclusion, "bad" if conclusion in FAILED else "warm"))
         canvas.put(line, 3, run.get("workflowName", "")[:name_w], style or "plain")
         if repo_at:
-            canvas.put(line, repo_at, labels.get(run.get("repo"), "")[:13], style or "label")
+            canvas.put(line, repo_at, labels.get(run.get("repo"), "here" if "build" in run else "")[:13], style or "label")
         canvas.put(line, left - 24, conclusion.upper()[:11], style or ("bad" if conclusion in FAILED else "plain"))
         age = ago(moment(run.get("createdAt", ""), STAMP))
         canvas.put(line, left - 1 - len(age), age, style or "label")
@@ -642,16 +655,20 @@ def manifest(canvas, cfg, queue, picked, runners=()):
         canvas.put(4, 2, (queue.problem or "no runs yet")[:left - 4], "warm")
         return
     x, w = left + 2, width - left - 2
-    band(canvas, 2, x, w, "RUN", (), f"#{chosen['databaseId']}")
+    build = chosen.get("build")
+    band(canvas, 2, x, w, "RUN", (), "not on GitHub" if build else f"#{chosen['databaseId']}")
     conclusion = chosen.get("conclusion") or chosen.get("status", "")
     tone = "title-bad" if conclusion in FAILED else "title" if conclusion == "success" else "title-warm"
     canvas.put(4, x + 1, f" {conclusion.upper().replace('_', ' ')} ", tone)
     canvas.put(5, x + 1, chosen.get("workflowName", "").upper()[:w - 2], "strong")
-    got = run_detail(chosen) or {}
-    facts = (("TITLE", got.get("displayTitle", "")), ("REPO", chosen.get("repo", "")), ("BRANCH", chosen.get("headBranch", "")),
-             ("COMMIT", chosen.get("headSha", "")[:7]), ("EVENT", got.get("event", "")),
-             ("RUNNER", (getattr(queue, "on", None) or {}).get(chosen["databaseId"], "")),
-             ("STARTED", ago(moment(chosen.get("createdAt", ""), STAMP)) + " ago"))
+    got = {} if build else run_detail(chosen) or {}
+    facts = (("COMMAND", build["cmd"]), ("FOLDER", build["cwd"]), ("BRANCH", build["branch"]), ("COMMIT", build["sha"]),
+             ("WITH", build["toolchain"]), ("STARTED", ago(build["start"]) + " ago"),
+             ("TOOK", span(build["end"] - build["start"]) if build["end"] and build["start"] else "")) if build else (
+            ("TITLE", got.get("displayTitle", "")), ("REPO", chosen.get("repo", "")), ("BRANCH", chosen.get("headBranch", "")),
+            ("COMMIT", chosen.get("headSha", "")[:7]), ("EVENT", got.get("event", "")),
+            ("RUNNER", (getattr(queue, "on", None) or {}).get(chosen["databaseId"], "")),
+            ("STARTED", ago(moment(chosen.get("createdAt", ""), STAMP)) + " ago"))
     line = 7
     for label, value in facts:
         if value and line < height - 3:
@@ -659,6 +676,15 @@ def manifest(canvas, cfg, queue, picked, runners=()):
             canvas.put(line, x + 10, str(value)[:w - 11], "plain")
             line += 1
     line += 1
+    if build:
+        # A build has no steps: what it printed is all there is to see of it, while it runs and after.
+        lines = printed(build)
+        if height - 2 - line >= 2:
+            canvas.put(line, x + 1, "LIVE" if conclusion == "in_progress" else "LOG", "label")
+            if lines is None:
+                canvas.put(line, x + 10, "none kept: it printed to the terminal it was started in"[:w - 11], "dim")
+            put_log(canvas, line + 1, x, w, height - 3 - line, lines or [])
+        return
     if got.get("jobs") is None:
         canvas.put(line, x + 1, spin("…") + " asking GitHub for the steps", "dim")
         return
@@ -768,7 +794,7 @@ def paint(canvas, cfg, runners, queue, machine, shown, note, picked=None, dialog
         deck(canvas, cfg, runners, queue, machine, picked, pcs, health)
     decode(screen, progress_of("page", 0.45))
     picking = (("field" if "field" in dialog else "dialog") if dialog else None if picked is None
-               else "request" if picked < 0 else "issue" if picked >= ISSUE_ROW else "run")
+               else "request" if picked < 0 else "build" if picked >= BUILD_ROW else "issue" if picked >= ISSUE_ROW else "run")
     if dialog:
         popup(screen, dialog)
     # Last: its keys are read while a question is up too.

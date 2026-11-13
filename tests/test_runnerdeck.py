@@ -2008,6 +2008,29 @@ assert "rustc 40 %   cargo 3 %" in _line and " pc " in _line, _line
 assert drawn(two, nothing, [_busy], width=150).count("BUSY") == drawn(two, nothing, [_busy], width=100).count("BUSY") + 1   # its column has a name
 assert "rustc" not in drawn(two, nothing, [_busy], width=100)                            # narrow: the line stays as it was
 
+# a build that is not on GitHub: what it prints is kept while it runs, and RUNS lists it with that as its log
+_data = os.environ["RUNNERDECK_DATA"]
+_shutil_data = builds.folder(_data)
+for _name in os.listdir(_shutil_data) if os.path.isdir(_shutil_data) else []:
+    os.remove(os.path.join(_shutil_data, _name))
+_said = subprocess.run([sys.executable, "-m", "runnerdeck", "run", "--name", "check", "--", sys.executable, "-c",
+                        "import sys; print('Compiling numa'); print('to the other', file=sys.stderr); sys.exit(3)"],
+                       env=dict(os.environ, PYTHONPATH=ROOT), capture_output=True, text=True, timeout=60)
+assert (_said.returncode, _said.stdout, _said.stderr) == (3, "Compiling numa\n", "to the other\n"), _said     # as it is: each to its own
+_built = builds.as_runs()
+assert len(_built) == 1 and _built[0]["row"] >= builds.BUILD_ROW and _built[0]["conclusion"] == "failure", _built
+assert sorted(builds.printed(_built[0]["build"])) == ["Compiling numa", "to the other"]
+_grid = terminal.Grid(30, 120)
+_queue = types.SimpleNamespace(runs=[a_run("o/alpha", 8)], requests=[], problem="", jobs={}, working={}, said="", on={})
+boxes.paint(_grid, configured("[deck]\nrepos = o/alpha\n"), [], _queue, None, 0, "", picked=_built[0]["row"], page=2)
+_text = _grid.text()
+assert "not on GitHub" in _text and "FAILURE" in _text and "LOG" in _text and "Compiling numa" in _text, _text
+assert "c cancel" not in _text and "esc back" in _text, _text                           # none of a run's keys: there is nothing to ask GitHub
+os.remove(_built[0]["build"]["log"])
+assert builds.printed(_built[0]["build"]) is None
+boxes.paint(_grid := terminal.Grid(30, 120), configured("[deck]\nrepos = o/alpha\n"), [], _queue, None, 0, "", picked=_built[0]["row"], page=2)
+assert "none kept" in _grid.text(), _grid.text()                                        # started at a terminal: it says so
+
 import shutil as _shutil
 _shutil.rmtree(os.environ["RUNNERDECK_DATA"], ignore_errors=True)
 print("ok")
