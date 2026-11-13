@@ -442,8 +442,9 @@ def needs(queue, pcs, rows):
     return said
 
 
-def vitals(canvas, y, x, name, now, history):
-    """A computer in one line: CPU as a graph and a number, GPU, memory as a meter, how hot or what it draws."""
+def vitals(canvas, y, x, name, now, history, width=0):
+    """A computer in one line: CPU as a graph and a number, GPU, memory as a meter, how hot or what it draws;
+    and, where there is room, what keeps its processor busy, as the MACHINES page says it."""
     canvas.put(y, x + 2, name[:13], "plain")
     graph(canvas, y, x + 16, 10, 1, history)
     for at, value in ((x + 27, now.get("cpu")), (x + 33, now.get("gpu"))):
@@ -455,6 +456,8 @@ def vitals(canvas, y, x, name, now, history):
     watts = (now.get("power") or {}).get("watts")
     extra = f"{now['cpu_temp']:.0f} °C" if now.get("cpu_temp") is not None else f"{watts:.0f} W" if watts is not None else ""
     canvas.put(y, x + 62, extra, "plain")
+    if width >= 90:
+        canvas.put(y, x + 74, "   ".join(f"{program} {share} %" for program, share in now.get("top") or [])[:width - 75], "plain")
 
 
 def runner_rows(canvas, y, x, width, rows, queue):
@@ -534,10 +537,10 @@ def deck(canvas, cfg, runners, queue, machine, picked, pcs, health):
         y = runner_rows(canvas, y, x, w, rows, queue) + 1
     computers = ([machine] if machine else []) + [pc for pc in pcs if pc.reachable()]
     if computers:
-        band(canvas, y, x, w, "MACHINES", ((16, "CPU"), (33, "GPU"), (40, "RAM"), (62, "HEAT/POWER")) if w >= 70 else ())
+        band(canvas, y, x, w, "MACHINES", ((16, "CPU"), (33, "GPU"), (40, "RAM"), (62, "HEAT/POWER")) + (((74, "BUSY"),) if w >= 90 else ()) if w >= 70 else ())
         for line, pc in enumerate(computers, start=y + 1):
             name = getattr(pc, "name", None) or cfg.computer or getattr(pc, "title", "mac")
-            vitals(canvas, line, x, name, pc.now, pc.cpu)
+            vitals(canvas, line, x, name, pc.now, pc.cpu, w)
         y += 1 + len(computers)
     y = max(y, top + 10 if wide else y) + 1
     # Below: what waits for a yes never gives way; then the builds, the health, and the runs, which give way first.

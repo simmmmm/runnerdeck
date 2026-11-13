@@ -2001,6 +2001,13 @@ with tempfile.TemporaryDirectory() as tmp:
     assert "LIVE" not in _runs_page({9: "waiting for linux"}) and "LIVE" not in _runs_page({})   # not on a runner yet: nothing said
     assert "LIVE" not in _runs_page({8: "box"}, [a_run("o/alpha", 8)])                    # a run that is over: as it was
 
+# DECK: a computer's line says what keeps its processor busy, where the screen is wide enough for it
+_busy = types.SimpleNamespace(failed=False, reachable=lambda: True, **dict(stub, now=dict(up.now, top=[("rustc", 40), ("cargo", 3)])))
+_line = next(line for line in drawn(two, nothing, [_busy], width=150).splitlines() if "rustc" in line)
+assert "rustc 40 %   cargo 3 %" in _line and " pc " in _line, _line
+assert drawn(two, nothing, [_busy], width=150).count("BUSY") == drawn(two, nothing, [_busy], width=100).count("BUSY") + 1   # its column has a name
+assert "rustc" not in drawn(two, nothing, [_busy], width=100)                            # narrow: the line stays as it was
+
 import shutil as _shutil
 _shutil.rmtree(os.environ["RUNNERDECK_DATA"], ignore_errors=True)
 print("ok")
