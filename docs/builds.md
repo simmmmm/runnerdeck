@@ -7,7 +7,7 @@ runnerdeck run --name tests -- cargo test --workspace
 runnerdeck run -- dev/check.sh
 ```
 
-The command runs as it is: with the same input, the same output and the same exit code. The program only writes down when it began, how it ended, and how long it took.
+The command runs as it is: with the same input, the same output and the same exit code. The program writes down when it began, how it ended, and how long it took. Where the command does not print to a terminal (a script or an assistant started it), what it prints is kept too.
 
 ## On the screen
 
@@ -16,6 +16,10 @@ A box `builds` shows the latest five, as the runners are shown:
 - `…` is a build that runs now, with how long it has run.
 - `✓` or `✗` is how a build ended, with how long it took and how long ago.
 - `–` is a build that was stopped (Ctrl-C) or that stopped without an end.
+
+The page RUNS lists the builds of this computer among GitHub's runs, with `here` as their repository. Choose one with `↑` `↓`: the right side shows its command, its folder, and the last lines it printed. They follow the build while it runs.
+
+A build that you start at a terminal prints there, with its colours and its progress bar, and no log is kept of it.
 
 If the computer with the builds is another one that you watch over SSH, its builds show in a box with its name (`builds · pc`).
 
@@ -39,7 +43,7 @@ Another language can be added: a function in `DETECTORS` in `runnerdeck/builds.p
 
 ## Where the records are
 
-One small file for each build, in `~/.local/share/runnerdeck/builds/`. Set `RUNNERDECK_DATA` to use another folder. The latest 60 are kept. While a build runs, its file is touched every 20 seconds. A build that has not been touched for 90 seconds and has no end was interrupted, and is shown with `–`.
+One small file for each build, in `~/.local/share/runnerdeck/builds/`, and a `.log` file beside it with what the build printed. Set `RUNNERDECK_DATA` to use another folder. The latest 60 are kept. While a build runs, its file is touched every 20 seconds. A build that has not been touched for 90 seconds and has no end was interrupted, and is shown with `–`.
 
 ## For a build that an assistant runs
 

@@ -14,11 +14,12 @@ from .system import WINDOWS
 from .config import ConfigError, EXAMPLE, NoConfig, default_path, load, runner_rows, set_computer, set_section
 from .runners import Runner, add_runner, keep_watch, runner_count, start_all, stop_all, watch
 from .health import ISSUE_ROW, Health, open_issue
+from .builds import BUILD_ROW
 from .github import Queue, act_on_run, approve, close, failed_log, row_of
 from .update import behind, remember, update
 from .machines import Pc, RemoteMac, build_machines, probe
 from .terminal import MOTION, ConsoleTerminal, CursesTerminal, ENTER, Grid, depth, K_BACKSPACE, K_DOWN, K_LEFT, K_RESIZE, K_RIGHT, K_UP, Screen, animating, colours, curses, start
-from .boxes import moving, paint, with_remote
+from .boxes import listed, moving, paint, with_remote
 from .builds import run_recorded
 from .intro import facts, play as opening, wipe
 from .setup import Wizard, menu, run as run_setup, show_text
@@ -252,12 +253,14 @@ def show(window, cfg, runners, queue, machine, pcs=(), health=None):
             page, note = key - ord("0"), ""
             start("page", 0.5)
             # What is chosen stays only where it can be seen: a run on DECK and RUNS, a request or an issue on DECK.
-            if picked is not None and (page in (3, 4) or (page == 2 and (picked < 0 or picked >= ISSUE_ROW))):
+            # A build of this computer only on RUNS.
+            if picked is not None and (page in (3, 4) or (page == 2 and (picked < 0 or ISSUE_ROW <= picked < BUILD_ROW))
+                                       or (page == 1 and picked >= BUILD_ROW)):
                 picked = None
             continue
         requests, runs = queue.requests, queue.runs or []
         # ↑↓ choose only what the page shows: so that c never cancels a run that is not on the screen.
-        items = [*requests, *(health.issues if health else []), *runs] if page == 1 else runs if page == 2 else []
+        items = [*requests, *(health.issues if health else []), *runs] if page == 1 else listed(queue) if page == 2 else []
         if key in (K_UP, K_DOWN) and items:
             rows = [row_of(item) for item in items]
             step = 1 if key == K_DOWN else -1
@@ -278,7 +281,7 @@ def show(window, cfg, runners, queue, machine, pcs=(), health=None):
         elif chosen and "databaseId" in chosen and key == ord("l"):
             note = "Reading the log…"
             show_text(window, f"{chosen.get('workflowName', 'run')} · what failed", failed_log(chosen))
-        elif chosen and row_of(chosen) > 0 and key == ord("o"):
+        elif chosen and row_of(chosen) > 0 and "build" not in chosen and key == ord("o"):
             note = (act_on_run(chosen, "o") if "databaseId" in chosen else open_issue(chosen))[0]
         elif key == ord("x"):
             busy = [runner.name for runner in runners if runner.state()[0] == "running"]

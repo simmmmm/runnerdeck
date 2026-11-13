@@ -9,11 +9,13 @@ import subprocess
 import sys
 import threading
 import time
-from .util import clean
+from .util import STAMP, clean
 
 # How many records are kept, and for how many seconds a build that nobody touched is still called running.
 KEEP = 60
 FRESH = 90
+# A build's row on the RUNS page: a number no run's, request's or issue's can be.
+BUILD_ROW = 10**15
 
 
 def data_dir():
@@ -75,8 +77,35 @@ def recent(limit=10, root=None):
         except (OSError, ValueError):
             continue
         if item:
+            # What it printed, where that was kept (see `record`).
+            item["log"] = path[:-5] + ".log"
             found.append(item)
     return found
+
+
+def as_runs(limit=5, root=None):
+    """The latest builds in the shape of GitHub's runs, for the RUNS page: a name, a branch, a commit, how
+    it ended and when it began. The build itself is under "build"."""
+    shaped = []
+    for build in recent(limit, root):
+        going = build["status"] == "running"
+        shaped.append({"row": BUILD_ROW + int((build["start"] or 0) * 1000), "build": build, "repo": "",
+                       "workflowName": build["name"], "headBranch": build["branch"], "headSha": build["sha"],
+                       "status": "in_progress" if going else "completed",
+                       "conclusion": "" if going else {"interrupted": "cancelled"}.get(build["status"], build["status"]),
+                       "createdAt": time.strftime(STAMP, time.gmtime(build["start"] or 0))})
+    return shaped
+
+
+def printed(build, size=16384):
+    """The end of what a build printed, as lines; None where nothing of it was kept."""
+    try:
+        with open(build.get("log") or "", "rb") as log:
+            log.seek(0, os.SEEK_END)
+            log.seek(max(0, log.tell() - size))
+            return log.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
 
 
 def read_text(path):
@@ -181,10 +210,31 @@ def write(path, info):
     os.replace(temporary, path)
 
 
+def copy(source, target, log):
+    """What the command prints goes where it would have gone, at once, and into the build's log as well."""
+    while True:
+        try:
+            data = os.read(source.fileno(), 65536)
+        except OSError:
+            return
+        if not data:
+            return
+        for to in (target, log):
+            try:
+                to.write(data)
+                to.flush()
+            except (OSError, ValueError):
+                pass
+
+
 def record(argv, name=None, root=None, beat=20.0):
     """Runs a command as it is, with its own input and output, and keeps a record of it: when it began,
     how it ended and how long it took. While it runs the record is touched every `beat` seconds, so
-    that a build that was killed is not shown as running for ever. Returns the command's exit code."""
+    that a build that was killed is not shown as running for ever. Returns the command's exit code.
+    What it prints is kept beside the record, for the screen to show while it runs, where it does not
+    print to a terminal: a person at a terminal reads it there, and a command that is piped there
+    would lose its colours and its progress bar."""
+    # ponytail: no log of a build started at a terminal; a pty would give one, if that is ever missed.
     directory = folder(root)
     os.makedirs(directory, exist_ok=True)
     started = time.time()
@@ -206,15 +256,28 @@ def record(argv, name=None, root=None, beat=20.0):
                 return
     threading.Thread(target=touch, daemon=True).start()
     code = 1
+    targets = {stream: getattr(sys, stream).buffer for stream in ("stdout", "stderr")
+               if hasattr(getattr(sys, stream), "buffer") and not getattr(sys, stream).isatty()}
+    try:
+        log = open(path[:-5] + ".log", "ab", buffering=0) if targets else None
+    except OSError:
+        log, targets = None, {}
     try:
         try:
-            process = subprocess.Popen(argv)
+            process = subprocess.Popen(argv, **{stream: subprocess.PIPE for stream in targets})
+            copies = [threading.Thread(target=copy, args=(getattr(process, stream), target, log), daemon=True)
+                      for stream, target in targets.items()]
+            for thread in copies:
+                thread.start()
             try:
                 code = process.wait()
             except KeyboardInterrupt:
                 # The child got the same Ctrl-C: wait for it to end, and say that it was stopped.
                 process.wait()
                 code = 130
+            # Not for ever: something the command left running may still hold its output open.
+            for thread in copies:
+                thread.join(2)
         except FileNotFoundError:
             print(f"runnerdeck: {argv[0]}: command not found", file=sys.stderr)
             code = 127
@@ -237,6 +300,8 @@ def prune(directory):
         files = sorted((os.stat(os.path.join(directory, n)).st_mtime, n) for n in os.listdir(directory) if n.endswith(".json"))
         for _, name in files[:-KEEP]:
             os.remove(os.path.join(directory, name))
+            if os.path.exists(os.path.join(directory, name[:-5] + ".log")):
+                os.remove(os.path.join(directory, name[:-5] + ".log"))
     except OSError:
         pass
 
