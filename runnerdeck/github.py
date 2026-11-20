@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import threading
 import time
+from . import ratelimit
 from .util import STAMP, clean, moment
 
 
@@ -120,6 +121,8 @@ class Queue:
         self.jobs = {}
         # Which runner has a run, or what it waits for, by the run's number.
         self.on = {}
+        self.queued_seen = {}
+        self.interval = 30
         self.requests = []
         # Whether runnerdeck itself has a newer version (see update.behind); set by the screen.
         self.update_ready = False
@@ -141,6 +144,8 @@ class Queue:
             threading.Thread(target=self.loop, daemon=True).start()
 
     def fetch_requests(self):
+        if ratelimit.wait():
+            return
         found = []
         labels = list(dict.fromkeys(([self.cfg.approval["label"]] if self.cfg.approval["label"] else [])
                                     + [kind["label"] for kind in self.cfg.kinds]))
@@ -155,6 +160,7 @@ class Queue:
                     issues = None
                 if issues is None:
                     told = False
+                    ratelimit.hit(got.stderr)
                     continue
                 # The oldest first: the order they were asked in.
                 for issue in reversed(issues):
@@ -168,6 +174,9 @@ class Queue:
         self.requests = found
 
     def fetch(self):
+        if ratelimit.wait():
+            self.problem = ratelimit.words()
+            return
         self.fetch_requests()
         runs, told, why = [], False, ""
         for repo in self.cfg.repos:
@@ -184,6 +193,8 @@ class Queue:
             elif not why:
                 lines = [line.strip() for line in (got.stderr or "").splitlines() if line.strip()]
                 why = f"{repo}: {lines[0]}" if lines else f"{repo}: gh did not answer"
+                if ratelimit.hit(got.stderr):
+                    why = ratelimit.words()
         self.problem = "" if told else why
         if not told:
             return
@@ -207,8 +218,14 @@ class Queue:
         for run in runs:
             if run.get("status") not in ("in_progress", "queued"):
                 continue
+            # A run that waits is asked about now and then: where it waits does not change by the second.
+            seen = self.queued_seen.get(run["databaseId"])
+            if run.get("status") == "queued" and seen and time.time() - seen[0] < 90:
+                on[run["databaseId"]] = seen[1]
+                continue
             got = subprocess.run(["gh", "api", f"repos/{run['repo']}/actions/runs/{run['databaseId']}/jobs"],
                                  capture_output=True, text=True)
+            ratelimit.hit(got.stderr) if got.returncode else None
             try:
                 listed = json.loads(got.stdout).get("jobs", []) if got.returncode == 0 else []
             except ValueError:
@@ -221,12 +238,16 @@ class Queue:
                 on[run["databaseId"]] = ", ".join(names)
             elif waits:
                 on[run["databaseId"]] = "waiting for " + "/".join(waits)
+                self.queued_seen[run["databaseId"]] = (time.time(), on[run["databaseId"]])
             for job in listed:
                 if job.get("runner_name") and job.get("status") == "in_progress":
                     jobs[job["runner_name"]] = {"workflow": run["workflowName"], "steps": job.get("steps") or [],
                                                 "started": moment(job.get("started_at") or "", STAMP),
                                                 "typical": typical.get((run["repo"], run["workflowName"]))}
         self.jobs, self.on = jobs, on
+        # Quicker while something goes on or waits, slower when all is quiet: the limit is for all of a person's tools.
+        busy = any(run.get("status") in ("in_progress", "queued") for run in runs) or self.requests
+        self.interval = 30 if busy else 60
 
     def carry_out(self, row, word, work):
         """`work` off the screen's thread, its row saying `word` until it is
@@ -251,7 +272,7 @@ class Queue:
     def loop(self):
         while True:
             self.fetch()
-            time.sleep(20)
+            time.sleep(self.interval if not ratelimit.wait() else min(60, ratelimit.wait()))
 
 
 DETAIL = {}
@@ -270,8 +291,13 @@ def run_detail(run):
 
         def ask():
             try:
+                if ratelimit.wait():
+                    entry["value"] = entry["value"] or {}
+                    entry["asking"] = False
+                    return
                 got = subprocess.run(["gh", "run", "view", str(run["databaseId"]), "--repo", run.get("repo", ""),
                                       "--json", "jobs,event,displayTitle"], capture_output=True, text=True, timeout=20)
+                ratelimit.hit(got.stderr) if got.returncode else None
                 entry["value"] = json.loads(got.stdout) if got.returncode == 0 else (entry["value"] or {})
             except (OSError, ValueError, subprocess.TimeoutExpired):
                 entry["value"] = entry["value"] or {}

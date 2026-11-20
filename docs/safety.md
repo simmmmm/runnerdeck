@@ -11,3 +11,7 @@
 When you add a runner, the token is on the command line of the `config` program for a few seconds. Other users of the same machine can see it. The token works one time and ends after one hour.
 
 The screen shows the token as dots. The program does not save the token.
+
+## GitHub's limit of requests
+
+GitHub gives a person 5000 requests an hour, for all their computers and tools together. runnerdeck asks every 30 seconds while a run goes on or waits, and every 60 seconds when all is quiet; the health box is read every five minutes; a run that waits is asked about every 90 seconds. When GitHub says the limit is used up, everything stops asking until it resets, and the screen says at what time it asks again. See what is left: `gh api rate_limit --jq .resources.core`. Two computers that both run runnerdeck, with an agent that also polls, can use it up: keep the screen open on one of them.

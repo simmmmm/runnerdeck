@@ -1694,6 +1694,25 @@ boxes.github_box(_g, 0, 100, [{"databaseId": 1, "workflowName": "Publish Linux",
 _text = _g.text()
 assert "Publish Linux" in _text and "on numa" in _text and "waiting for Linux" in _text, _text
 
+# GitHub's limit: when it is used up everything waits until it resets, and the screen says so
+from runnerdeck import ratelimit
+_run = ratelimit.subprocess.run
+ratelimit.subprocess.run = lambda command, **kw: types.SimpleNamespace(returncode=0, stdout=str(int(time.time()) + 120) + "\n", stderr="")
+try:
+    assert not ratelimit.hit("HTTP 404: Not Found") and ratelimit.wait() == 0
+    assert ratelimit.hit("HTTP 403: API rate limit exceeded for user ID 1") and 100 < ratelimit.wait() < 130
+    assert "used up" in ratelimit.words()
+    _calls = []
+    _q = github.Queue.__new__(github.Queue)
+    _q.cfg = types.SimpleNamespace(repos=["a/b"], approval={"label": ""}, kinds=[])
+    _q.problem, _q.requests, _q.over, _q.working = "", [], set(), {}
+    _q.fetch()                                                    # waits: nothing is asked
+    assert "used up" in _q.problem
+finally:
+    ratelimit.subprocess.run = _run
+    ratelimit.until = 0.0
+assert ratelimit.wait() == 0
+
 # a computer that does not answer says why, in words, and a Mac's answer must be the program's own
 for said, word in (("ssh: connect to host 10.0.0.9 port 22: Connection refused", "SSH server"), ("", "did not connect")):
     assert word in machines.explain_ssh(said, "me@mac"), said

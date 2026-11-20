@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import threading
 import time
+from . import ratelimit
 from .util import STAMP, moment
 from .terminal import frame, right
 
@@ -92,20 +93,24 @@ def open_issue(issue):
 
 def asked(command):
     """The JSON that `gh` printed, or None where it did not answer."""
+    if ratelimit.wait():
+        return None
     try:
         got = subprocess.run(["gh", *command], capture_output=True, text=True, timeout=30)
+        if got.returncode:
+            ratelimit.hit(got.stderr)
         return json.loads(got.stdout) if got.returncode == 0 else None
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
 
 
 class Health:
-    """What `[health]` asks, read every two minutes (GitHub is asked about four times for each repository:
+    """What `[health]` asks, read every five minutes (GitHub is asked about four times for each repository:
     more often than that is no use, a CI run takes minutes). `repos` has, for each repository, its
     workflows, the queued runs that wait too long and its open issues; one repository that does not
     answer keeps what was known of it."""
 
-    EVERY = 120
+    EVERY = 300
 
     def __init__(self, cfg, once=False):
         self.cfg = cfg
