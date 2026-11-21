@@ -1713,6 +1713,14 @@ finally:
     ratelimit.until = 0.0
 assert ratelimit.wait() == 0
 
+# what is said of a stopped runner: s only for one of this computer's; one read over ssh is started where it is
+_mine = types.SimpleNamespace(name="box", start=lambda: None, state=lambda: ("stopped", "", None, ""))
+_far = types.SimpleNamespace(name="mac", state=lambda: ("stopped", "", None, ""))
+_unset = types.SimpleNamespace(name="mac-9", state=lambda: ("not set up", "", None, ""))
+_said = [words for words, _ in boxes.needs(types.SimpleNamespace(runs=[]), [], [("here", _mine), ("mac", _far), ("mac", _unset)])]
+assert _said == ["box on here is stopped · s starts it", "mac on mac is stopped · start it on mac",
+                 "mac-9 on mac is not set up · start it on mac"], _said
+
 # a computer that does not answer says why, in words, and a Mac's answer must be the program's own
 for said, word in (("ssh: connect to host 10.0.0.9 port 22: Connection refused", "SSH server"), ("", "did not connect")):
     assert word in machines.explain_ssh(said, "me@mac"), said

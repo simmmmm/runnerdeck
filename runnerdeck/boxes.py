@@ -439,8 +439,15 @@ def needs(queue, pcs, rows):
         if getattr(pc, "failed", False) and not pc.reachable():
             why = getattr(pc, "why", "")
             said.append((f"{pc.name} not answering" + (f": {head_why(why)}" if why else ""), "warm"))
-    said += [(f"{runner.name} on {where} is stopped · s starts it", "warm") for where, runner in rows
-             if runner.state()[0] in ("stopped", "not set up")]
+    # Only a runner of this computer can be started from here: one that is read over ssh is started where it is.
+    for where, runner in rows:
+        state = runner.state()[0]
+        if state not in ("stopped", "not set up"):
+            continue
+        mine = hasattr(runner, "start")
+        words = "is stopped" if state == "stopped" else "is not set up"
+        todo = (" · s starts it" if state == "stopped" else " · m, then add a runner") if mine else f" · start it on {where}"
+        said.append((f"{runner.name} on {where} {words}{todo}", "warm"))
     return said
 
 
